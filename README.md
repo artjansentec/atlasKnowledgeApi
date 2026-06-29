@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src="docs/images/golang-logo.png" alt="Golang" width="420" />
+<img src="docs/images/golang-logo.png" alt="Golang" width="720" />
+
+<br /><br />
 
 # Atlas Knowledge API
 
@@ -86,11 +88,14 @@ CREATE DATABASE atlas_knowledge;
 
 ## Início rápido
 
-<div align="center">
-<img src="docs/images/golang-programming.png" alt="Gopher programando" width="280" />
-</div>
+<table>
+<tr>
+<td width="44%" align="center" valign="middle">
 
-<br />
+<img src="docs/images/golang-programming.png" alt="Gopher programando em Go" width="420" />
+
+</td>
+<td width="56%" valign="top">
 
 ### Windows (PowerShell)
 
@@ -117,6 +122,10 @@ make run
 ```
 
 > O primeiro admin só pode ser criado em banco **vazio** (sem usuários cadastrados).
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -218,10 +227,18 @@ go run ./cmd/create-admin -email seu@email.com -password SUA_SENHA
 
 ---
 
+<br />
+
 <div align="center">
 
-Feito com Go
+<img src="docs/images/golang-programming.png" alt="Gopher programando em Go" width="520" />
 
-<img src="docs/images/golang-logo.png" alt="Golang" width="200" />
+<br /><br />
+
+<img src="docs/images/golang-logo.png" alt="Golang" width="560" />
+
+<br /><br />
+
+<sub>Feito com Go · Atlas Knowledge API</sub>
 
 </div>
