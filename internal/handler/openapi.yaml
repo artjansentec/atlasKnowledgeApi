@@ -1,0 +1,551 @@
+openapi: 3.0.3
+info:
+  title: Atlas Knowledge API
+  description: |
+    API REST da wiki corporativa Atlas Knowledge.
+
+    **Autenticação:** faça login em `POST /api/v1/auth/login`, copie o `accessToken` e clique em **Authorize** (cadeado) informando `Bearer SEU_TOKEN`.
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:8080
+    description: Desenvolvimento local
+
+tags:
+  - name: health
+  - name: auth
+  - name: users
+  - name: dashboard
+  - name: search
+  - name: projects
+  - name: sections
+  - name: lessons
+  - name: attachments
+
+paths:
+  /api/v1/health:
+    get:
+      tags: [health]
+      summary: Health check
+      description: Verifica se a API e o banco estão respondendo.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  database:
+                    type: string
+                    example: connected
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  example: admin@example.com
+                password:
+                  type: string
+                  example: sua-senha
+      responses:
+        '200':
+          description: Token de acesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Renovar access token (cookie refresh_token)
+      responses:
+        '200':
+          description: Novo access token
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Sem conteúdo
+
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      summary: Usuário autenticado
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Perfil do usuário
+
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: Listar usuários ativos
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de usuários
+
+  /api/v1/dashboard/summary:
+    get:
+      tags: [dashboard]
+      summary: Resumo do dashboard
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Indicadores e atualizações recentes
+
+  /api/v1/search:
+    get:
+      tags: [search]
+      summary: Busca global
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          example: wiki
+      responses:
+        '200':
+          description: Resultados agrupados
+
+  /api/v1/projects:
+    get:
+      tags: [projects]
+      summary: Listar projetos
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, paused, done]
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: responsible
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Lista resumida de projetos
+    post:
+      tags: [projects]
+      summary: Criar projeto (admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Projeto criado
+
+  /api/v1/projects/{slug}:
+    get:
+      tags: [projects]
+      summary: Detalhe do projeto
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: ProjectResponse completo
+    patch:
+      tags: [projects]
+      summary: Atualizar projeto (parcial)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, paused, done]
+                responsibleUserId:
+                  type: string
+                  format: uuid
+                client:
+                  type: string
+                tags:
+                  type: array
+                  items:
+                    type: string
+                tech:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Projeto atualizado
+    delete:
+      tags: [projects]
+      summary: Remover projeto (admin, soft delete)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '204':
+          description: Removido
+
+  /api/v1/projects/{slug}/readers:
+    put:
+      tags: [projects]
+      summary: Definir leitores do projeto
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '204':
+          description: Atualizado
+
+  /api/v1/projects/{slug}/sections:
+    post:
+      tags: [sections]
+      summary: Criar seção
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+                parentId:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: Seção criada
+
+  /api/v1/projects/{slug}/sections/{sectionId}:
+    patch:
+      tags: [sections]
+      summary: Atualizar seção
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '200':
+          description: Seção atualizada
+    delete:
+      tags: [sections]
+      summary: Remover seção (soft delete)
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removida
+
+  /api/v1/projects/{slug}/sections/reorder:
+    put:
+      tags: [sections]
+      summary: Reordenar seções
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      parentId:
+                        type: string
+                        nullable: true
+                      sortOrder:
+                        type: integer
+      responses:
+        '204':
+          description: Reordenado
+
+  /api/v1/projects/{slug}/lessons:
+    post:
+      tags: [lessons]
+      summary: Criar lição aprendida
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LessonRequest'
+      responses:
+        '201':
+          description: Lição criada
+
+  /api/v1/projects/{slug}/lessons/{lessonId}:
+    patch:
+      tags: [lessons]
+      summary: Atualizar lição
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: lessonId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LessonRequest'
+      responses:
+        '200':
+          description: Lição atualizada
+    delete:
+      tags: [lessons]
+      summary: Remover lição
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: lessonId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removida
+
+  /api/v1/projects/{slug}/attachments:
+    post:
+      tags: [attachments]
+      summary: Upload de anexo
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Anexo criado
+
+  /api/v1/projects/{slug}/attachments/{attachmentId}:
+    delete:
+      tags: [attachments]
+      summary: Remover anexo
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removido
+
+  /api/v1/files/{fileId}/download:
+    get:
+      tags: [attachments]
+      summary: Download de arquivo
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Stream do arquivo
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Slug:
+      name: slug
+      in: path
+      required: true
+      schema:
+        type: string
+      example: meu-projeto
+
+  schemas:
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            email:
+              type: string
+            role:
+              type: string
+              enum: [admin, user]
+
+    CreateProjectRequest:
+      type: object
+      required: [name, description, responsibleUserId]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, paused, done]
+        responsibleUserId:
+          type: string
+          format: uuid
+        client:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        tech:
+          type: array
+          items:
+            type: string
+        sectionTitle:
+          type: string
+        sectionContent:
+          type: string
+
+    LessonRequest:
+      type: object
+      required: [type, title, description, recommendation]
+      properties:
+        type:
+          type: string
+          enum: [problem, attention, future, success]
+        title:
+          type: string
+        description:
+          type: string
+        recommendation:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
