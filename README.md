@@ -231,14 +231,6 @@ go run ./cmd/create-admin -email seu@email.com -password SUA_SENHA
 
 <div align="center">
 
-<img src="docs/images/golang-programming.png" alt="Gopher programando em Go" width="520" />
-
-<br /><br />
-
-<img src="docs/images/golang-logo.png" alt="Golang" width="560" />
-
-<br /><br />
-
 <sub>Feito com Go · Atlas Knowledge API</sub>
 
 </div>
