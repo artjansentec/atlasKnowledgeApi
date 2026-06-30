@@ -102,16 +102,28 @@ func (r *SectionRepository) Reorder(ctx context.Context, projectID string, items
 	return tx.Commit(ctx)
 }
 
-func (r *SectionRepository) CountByProjects(ctx context.Context, projectIDs []string) (int, error) {
+func (r *SectionRepository) CountByProjects(ctx context.Context, projectIDs []string, period *domain.DateRange) (int, error) {
 	if projectIDs != nil && len(projectIDs) == 0 {
 		return 0, nil
 	}
-	var count int
-	if projectIDs == nil {
-		err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM project_sections WHERE deleted_at IS NULL`).Scan(&count)
-		return count, err
+	query := `SELECT COUNT(*) FROM project_sections WHERE deleted_at IS NULL`
+	args := []interface{}{}
+	idx := 1
+
+	if period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *period, idx)
+		query += " AND " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
 	}
-	err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM project_sections WHERE deleted_at IS NULL AND project_id = ANY($1)`, projectIDs).Scan(&count)
+
+	if projectIDs != nil {
+		query += fmt.Sprintf(" AND project_id = ANY($%d)", idx)
+		args = append(args, projectIDs)
+	}
+
+	var count int
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&count)
 	return count, err
 }
 
@@ -119,18 +131,19 @@ func (r *SectionRepository) Search(ctx context.Context, query string, allowedIDs
 	if allowedIDs != nil && len(allowedIDs) == 0 {
 		return nil, nil
 	}
+	pattern := likePattern(query)
 	sql := `
 		SELECT id, project_id, parent_id, title, content, sort_order, created_at, updated_at, deleted_at
 		FROM project_sections
 		WHERE deleted_at IS NULL
-		  AND to_tsvector('portuguese', title || ' ' || content) @@ plainto_tsquery('portuguese', $1)
+		  AND (LOWER(title) LIKE $1 OR LOWER(content) LIKE $1)
 	`
-	args := []interface{}{query}
+	args := []interface{}{pattern}
 	if allowedIDs != nil {
 		sql += " AND project_id = ANY($2)"
 		args = append(args, allowedIDs)
 	}
-	sql += " ORDER BY updated_at DESC LIMIT 50"
+	sql += fmt.Sprintf(" ORDER BY updated_at DESC LIMIT %d", SearchLimitSections)
 
 	rows, err := r.db.Pool.Query(ctx, sql, args...)
 	if err != nil {

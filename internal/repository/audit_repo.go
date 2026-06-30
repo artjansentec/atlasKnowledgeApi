@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/atlas/knowledge-api/internal/db"
 	"github.com/atlas/knowledge-api/internal/domain"
@@ -51,7 +52,38 @@ func (r *AuditRepository) ListByProject(ctx context.Context, projectID string) (
 	return events, rows.Err()
 }
 
-func (r *AuditRepository) Recent(ctx context.Context, limit int, allowedIDs []string) ([]domain.AuditEvent, error) {
+func (r *AuditRepository) CountByProjects(ctx context.Context, projectIDs []string, period *domain.DateRange) (int, error) {
+	if projectIDs != nil && len(projectIDs) == 0 {
+		return 0, nil
+	}
+	query := `SELECT COUNT(*) FROM audit_events`
+	args := []interface{}{}
+	idx := 1
+	where := false
+
+	if period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("created_at", *period, idx)
+		query += " WHERE " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
+		where = true
+	}
+
+	if projectIDs != nil {
+		if where {
+			query += fmt.Sprintf(" AND project_id = ANY($%d)", idx)
+		} else {
+			query += fmt.Sprintf(" WHERE project_id = ANY($%d)", idx)
+		}
+		args = append(args, projectIDs)
+	}
+
+	var count int
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&count)
+	return count, err
+}
+
+func (r *AuditRepository) Recent(ctx context.Context, limit int, allowedIDs []string, period *domain.DateRange) ([]domain.AuditEvent, error) {
 	if allowedIDs != nil && len(allowedIDs) == 0 {
 		return nil, nil
 	}
@@ -60,15 +92,29 @@ func (r *AuditRepository) Recent(ctx context.Context, limit int, allowedIDs []st
 		FROM audit_events
 	`
 	args := []interface{}{}
-	if allowedIDs != nil {
-		sql += " WHERE project_id = ANY($1)"
-		args = append(args, allowedIDs)
-		sql += " ORDER BY created_at DESC LIMIT $2"
-		args = append(args, limit)
-	} else {
-		sql += " ORDER BY created_at DESC LIMIT $1"
-		args = append(args, limit)
+	idx := 1
+	where := false
+
+	if period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("created_at", *period, idx)
+		sql += " WHERE " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
+		where = true
 	}
+
+	if allowedIDs != nil {
+		if where {
+			sql += fmt.Sprintf(" AND project_id = ANY($%d)", idx)
+		} else {
+			sql += fmt.Sprintf(" WHERE project_id = ANY($%d)", idx)
+		}
+		args = append(args, allowedIDs)
+		idx++
+	}
+
+	sql += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d", idx)
+	args = append(args, limit)
 
 	rows, err := r.db.Pool.Query(ctx, sql, args...)
 	if err != nil {
@@ -91,17 +137,20 @@ func (r *AuditRepository) Search(ctx context.Context, query string, allowedIDs [
 	if allowedIDs != nil && len(allowedIDs) == 0 {
 		return nil, nil
 	}
+	limit := SearchLimitUpdates
+	pattern := likePattern(query)
 	sql := `
 		SELECT id, project_id, actor_user_id, action, target, entity_type, entity_id, metadata, created_at
 		FROM audit_events
-		WHERE to_tsvector('portuguese', action || ' ' || target) @@ plainto_tsquery('portuguese', $1)
+		WHERE created_at >= NOW() - make_interval(days => $1)
+		  AND (LOWER(action) LIKE $2 OR LOWER(target) LIKE $2)
 	`
-	args := []interface{}{query}
+	args := []interface{}{SearchUpdatesMaxAgeDays, pattern}
 	if allowedIDs != nil {
-		sql += " AND project_id = ANY($2)"
+		sql += " AND project_id = ANY($3)"
 		args = append(args, allowedIDs)
 	}
-	sql += " ORDER BY created_at DESC LIMIT 50"
+	sql += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d", limit)
 
 	rows, err := r.db.Pool.Query(ctx, sql, args...)
 	if err != nil {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/atlas/knowledge-api/internal/domain"
+	"github.com/atlas/knowledge-api/internal/mapper"
 	"github.com/atlas/knowledge-api/internal/repository"
 	"github.com/atlas/knowledge-api/pkg/httperr"
 )
@@ -46,10 +48,16 @@ type SearchResponse struct {
 	Updates  []SearchResultItem `json:"updates"`
 }
 
+const MinSearchQueryLen = 3
+
+func searchQueryReady(query string) bool {
+	return utf8.RuneCountInString(strings.TrimSpace(query)) >= MinSearchQueryLen
+}
+
 func (s *SearchService) Search(ctx context.Context, user domain.User, query string) (*SearchResponse, error) {
 	query = strings.TrimSpace(query)
-	if query == "" {
-		return &SearchResponse{}, nil
+	if query == "" || !searchQueryReady(query) {
+		return emptySearchResponse(), nil
 	}
 
 	allowed, err := s.projects.AccessibleProjectIDs(ctx, user.ID, IsAdmin(user))
@@ -82,7 +90,7 @@ func (s *SearchService) Search(ctx context.Context, user domain.User, query stri
 		projectMap[p.ID] = p
 	}
 
-	resp := &SearchResponse{}
+	resp := emptySearchResponse()
 	for _, p := range projects {
 		responsible, _ := s.users.GetByID(ctx, p.ResponsibleUserID)
 		responsibleName := ""
@@ -140,12 +148,22 @@ func (s *SearchService) Search(ctx context.Context, user domain.User, query stri
 	return resp, nil
 }
 
+func emptySearchResponse() *SearchResponse {
+	return &SearchResponse{
+		Projects: []SearchResultItem{},
+		Sections: []SearchResultItem{},
+		Lessons:  []SearchResultItem{},
+		Updates:  []SearchResultItem{},
+	}
+}
+
 type DashboardService struct {
 	projects *repository.ProjectRepository
 	sections *repository.SectionRepository
 	lessons  *repository.LessonRepository
 	audit    *repository.AuditRepository
 	users    *repository.UserRepository
+	tags     *repository.TagRepository
 }
 
 func NewDashboardService(
@@ -154,15 +172,19 @@ func NewDashboardService(
 	lessons *repository.LessonRepository,
 	audit *repository.AuditRepository,
 	users *repository.UserRepository,
+	tags *repository.TagRepository,
 ) *DashboardService {
-	return &DashboardService{projects: projects, sections: sections, lessons: lessons, audit: audit, users: users}
+	return &DashboardService{projects: projects, sections: sections, lessons: lessons, audit: audit, users: users, tags: tags}
 }
 
 type DashboardSummary struct {
-	ProjectCount    int                    `json:"projectCount"`
-	DocumentCount   int                    `json:"documentCount"`
-	LessonCount     int                    `json:"lessonCount"`
-	RecentUpdates   []DashboardUpdateItem  `json:"recentUpdates"`
+	ProjectCount       int                     `json:"projectCount"`
+	ActiveProjectCount int                     `json:"activeProjectCount"`
+	DocumentCount      int                     `json:"documentCount"`
+	LessonCount        int                     `json:"lessonCount"`
+	UpdateCount        int                     `json:"updateCount"`
+	RecentUpdates      []DashboardUpdateItem   `json:"recentUpdates"`
+	RecentProjects     []mapper.ProjectListItem `json:"recentProjects"`
 }
 
 type DashboardUpdateItem struct {
@@ -175,28 +197,54 @@ type DashboardUpdateItem struct {
 	ProjectName string `json:"projectName"`
 }
 
-func (s *DashboardService) Summary(ctx context.Context, user domain.User) (*DashboardSummary, error) {
+func (s *DashboardService) Summary(ctx context.Context, user domain.User, period *domain.DateRange) (*DashboardSummary, error) {
 	allowed, err := s.projects.AccessibleProjectIDs(ctx, user.ID, IsAdmin(user))
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar dashboard")
 	}
 
-	projectCount, err := s.projects.CountActive(ctx, allowed)
+	projectCount, err := s.projects.CountActive(ctx, allowed, period)
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar dashboard")
 	}
-	docCount, err := s.sections.CountByProjects(ctx, allowed)
+	activeProjectCount, err := s.projects.CountWithStatus(ctx, allowed, domain.StatusActive, period)
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar dashboard")
 	}
-	lessonCount, err := s.lessons.CountByProjects(ctx, allowed)
+	docCount, err := s.sections.CountByProjects(ctx, allowed, period)
+	if err != nil {
+		return nil, httperr.Internal("falha ao carregar dashboard")
+	}
+	lessonCount, err := s.lessons.CountByProjects(ctx, allowed, period)
+	if err != nil {
+		return nil, httperr.Internal("falha ao carregar dashboard")
+	}
+	updateCount, err := s.audit.CountByProjects(ctx, allowed, period)
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar dashboard")
 	}
 
-	events, err := s.audit.Recent(ctx, 6, allowed)
+	events, err := s.audit.Recent(ctx, 6, allowed, period)
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar dashboard")
+	}
+
+	recentFilter := domain.ProjectListFilter{Limit: 5}
+	if period != nil {
+		recentFilter.Period = period
+	}
+	recentProjects, err := s.projects.List(ctx, recentFilter, allowed)
+	if err != nil {
+		return nil, httperr.Internal("falha ao carregar dashboard")
+	}
+
+	projectItems := make([]mapper.ProjectListItem, 0, len(recentProjects))
+	for _, p := range recentProjects {
+		item, err := s.buildProjectListItem(ctx, p)
+		if err != nil {
+			return nil, httperr.Internal("falha ao carregar dashboard")
+		}
+		projectItems = append(projectItems, item)
 	}
 
 	updates := make([]DashboardUpdateItem, 0, len(events))
@@ -221,9 +269,27 @@ func (s *DashboardService) Summary(ctx context.Context, user domain.User) (*Dash
 	}
 
 	return &DashboardSummary{
-		ProjectCount: projectCount, DocumentCount: docCount,
-		LessonCount: lessonCount, RecentUpdates: updates,
+		ProjectCount: projectCount, ActiveProjectCount: activeProjectCount,
+		DocumentCount: docCount, LessonCount: lessonCount, UpdateCount: updateCount,
+		RecentUpdates: updates, RecentProjects: projectItems,
 	}, nil
+}
+
+func (s *DashboardService) buildProjectListItem(ctx context.Context, p domain.Project) (mapper.ProjectListItem, error) {
+	responsible := ""
+	u, _ := s.users.GetByID(ctx, p.ResponsibleUserID)
+	if u != nil {
+		responsible = u.Name
+	}
+	tags, err := s.tags.ListProjectTagNames(ctx, p.ID, domain.TagGeneral)
+	if err != nil {
+		return mapper.ProjectListItem{}, err
+	}
+	tech, err := s.tags.ListProjectTagNames(ctx, p.ID, domain.TagTech)
+	if err != nil {
+		return mapper.ProjectListItem{}, err
+	}
+	return mapper.ToProjectListItem(p, responsible, nil, tags, tech), nil
 }
 
 func truncate(s string, max int) string {

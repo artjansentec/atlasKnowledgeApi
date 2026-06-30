@@ -143,6 +143,17 @@ type ProjectListFilter struct {
 	Status      string
 	Query       string
 	Responsible string
+	Limit       int // 0 = sem limite
+	Period      *DateRange
+}
+
+type DateRange struct {
+	From time.Time
+	To   time.Time
+}
+
+func (r DateRange) Valid() bool {
+	return !r.From.IsZero() && !r.To.IsZero() && !r.From.After(r.To)
 }
 
 type SectionReorderItem struct {

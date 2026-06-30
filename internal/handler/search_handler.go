@@ -2,9 +2,12 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/atlas/knowledge-api/internal/domain"
 	"github.com/atlas/knowledge-api/internal/middleware"
 	"github.com/atlas/knowledge-api/internal/service"
+	"github.com/atlas/knowledge-api/pkg/httperr"
 	"github.com/labstack/echo/v4"
 )
 
@@ -33,11 +36,40 @@ func NewDashboardHandler(dashboard *service.DashboardService) *DashboardHandler 
 }
 
 func (h *DashboardHandler) Summary(c echo.Context) error {
-	summary, err := h.dashboard.Summary(c.Request().Context(), middleware.GetUser(c))
+	period, err := parseDashboardPeriod(c.QueryParam("from"), c.QueryParam("to"))
+	if err != nil {
+		return Error(c, err)
+	}
+
+	summary, err := h.dashboard.Summary(c.Request().Context(), middleware.GetUser(c), period)
 	if err != nil {
 		return Error(c, err)
 	}
 	return JSON(c, http.StatusOK, summary)
+}
+
+func parseDashboardPeriod(fromStr, toStr string) (*domain.DateRange, error) {
+	if fromStr == "" && toStr == "" {
+		return nil, nil
+	}
+	if fromStr == "" || toStr == "" {
+		return nil, httperr.Validation("informe from e to no formato YYYY-MM-DD")
+	}
+
+	from, err := time.Parse("2006-01-02", fromStr)
+	if err != nil {
+		return nil, httperr.Validation("from inválido; use YYYY-MM-DD")
+	}
+	to, err := time.Parse("2006-01-02", toStr)
+	if err != nil {
+		return nil, httperr.Validation("to inválido; use YYYY-MM-DD")
+	}
+
+	period := domain.DateRange{From: from, To: to}
+	if !period.Valid() {
+		return nil, httperr.Validation("from não pode ser posterior a to")
+	}
+	return &period, nil
 }
 
 type UserHandler struct {

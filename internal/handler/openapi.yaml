@@ -129,6 +129,8 @@ paths:
           required: true
           schema:
             type: string
+            minLength: 3
+          description: Termo de busca (mínimo 3 caracteres; consultas menores retornam listas vazias sem acessar o banco).
           example: wiki
       responses:
         '200':

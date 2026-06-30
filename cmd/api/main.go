@@ -75,7 +75,7 @@ func main() {
 	lessonSvc := service.NewLessonService(projectRepo, lessonRepo, tagRepo, auditRepo, database.Pool)
 	attachmentSvc := service.NewAttachmentService(cfg, projectRepo, attachmentRepo, fileRepo, auditRepo, fileStore, database.Pool)
 	searchSvc := service.NewSearchService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo)
-	dashboardSvc := service.NewDashboardService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo)
+	dashboardSvc := service.NewDashboardService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo, tagRepo)
 	userSvc := service.NewUserListService(userRepo)
 
 	authMW := middleware.NewAuthMiddleware(authSvc)

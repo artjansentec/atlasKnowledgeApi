@@ -88,16 +88,28 @@ func (r *LessonRepository) SoftDelete(ctx context.Context, lessonID string) erro
 	return err
 }
 
-func (r *LessonRepository) CountByProjects(ctx context.Context, projectIDs []string) (int, error) {
+func (r *LessonRepository) CountByProjects(ctx context.Context, projectIDs []string, period *domain.DateRange) (int, error) {
 	if projectIDs != nil && len(projectIDs) == 0 {
 		return 0, nil
 	}
-	var count int
-	if projectIDs == nil {
-		err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM project_lessons WHERE deleted_at IS NULL`).Scan(&count)
-		return count, err
+	query := `SELECT COUNT(*) FROM project_lessons WHERE deleted_at IS NULL`
+	args := []interface{}{}
+	idx := 1
+
+	if period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("created_at", *period, idx)
+		query += " AND " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
 	}
-	err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM project_lessons WHERE deleted_at IS NULL AND project_id = ANY($1)`, projectIDs).Scan(&count)
+
+	if projectIDs != nil {
+		query += fmt.Sprintf(" AND project_id = ANY($%d)", idx)
+		args = append(args, projectIDs)
+	}
+
+	var count int
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&count)
 	return count, err
 }
 
@@ -105,18 +117,28 @@ func (r *LessonRepository) Search(ctx context.Context, query string, allowedIDs 
 	if allowedIDs != nil && len(allowedIDs) == 0 {
 		return nil, nil
 	}
+	pattern := likePattern(query)
 	sql := `
 		SELECT id, project_id, type, title, description, recommendation, created_by, created_at, updated_at, deleted_at
 		FROM project_lessons
 		WHERE deleted_at IS NULL
-		  AND to_tsvector('portuguese', title || ' ' || description || ' ' || recommendation) @@ plainto_tsquery('portuguese', $1)
+		  AND (
+			LOWER(title) LIKE $1
+			OR LOWER(description) LIKE $1
+			OR LOWER(recommendation) LIKE $1
+			OR EXISTS (
+				SELECT 1 FROM lesson_tags lt
+				JOIN tags t ON t.id = lt.tag_id
+				WHERE lt.lesson_id = project_lessons.id AND LOWER(t.name) LIKE $1
+			)
+		  )
 	`
-	args := []interface{}{query}
+	args := []interface{}{pattern}
 	if allowedIDs != nil {
 		sql += " AND project_id = ANY($2)"
 		args = append(args, allowedIDs)
 	}
-	sql += " ORDER BY created_at DESC LIMIT 50"
+	sql += fmt.Sprintf(" ORDER BY created_at DESC LIMIT %d", SearchLimitLessons)
 
 	rows, err := r.db.Pool.Query(ctx, sql, args...)
 	if err != nil {

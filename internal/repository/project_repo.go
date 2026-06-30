@@ -87,7 +87,19 @@ func (r *ProjectRepository) List(ctx context.Context, filter domain.ProjectListF
 		idx++
 	}
 
+	if filter.Period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *filter.Period, idx)
+		query += " AND " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
+	}
+
 	query += " ORDER BY updated_at DESC"
+
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", idx)
+		args = append(args, filter.Limit)
+	}
 
 	rows, err := r.db.Pool.Query(ctx, query, args...)
 	if err != nil {
@@ -149,16 +161,53 @@ func (r *ProjectRepository) SoftDelete(ctx context.Context, id string) error {
 	return err
 }
 
-func (r *ProjectRepository) CountActive(ctx context.Context, allowedIDs []string) (int, error) {
+func (r *ProjectRepository) CountActive(ctx context.Context, allowedIDs []string, period *domain.DateRange) (int, error) {
 	if allowedIDs != nil && len(allowedIDs) == 0 {
 		return 0, nil
 	}
-	var count int
-	if allowedIDs == nil {
-		err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`).Scan(&count)
-		return count, err
+	query := `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`
+	args := []interface{}{}
+	idx := 1
+
+	if period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *period, idx)
+		query += " AND " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
 	}
-	err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL AND id = ANY($1)`, allowedIDs).Scan(&count)
+
+	if allowedIDs != nil {
+		query += fmt.Sprintf(" AND id = ANY($%d)", idx)
+		args = append(args, allowedIDs)
+	}
+
+	var count int
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&count)
+	return count, err
+}
+
+func (r *ProjectRepository) CountWithStatus(ctx context.Context, allowedIDs []string, status domain.ProjectStatus, period *domain.DateRange) (int, error) {
+	if allowedIDs != nil && len(allowedIDs) == 0 {
+		return 0, nil
+	}
+	query := `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL AND status = $1`
+	args := []interface{}{status}
+	idx := 2
+
+	if period != nil {
+		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *period, idx)
+		query += " AND " + clause
+		args = append(args, periodArgs...)
+		idx = nextIdx
+	}
+
+	if allowedIDs != nil {
+		query += fmt.Sprintf(" AND id = ANY($%d)", idx)
+		args = append(args, allowedIDs)
+	}
+
+	var count int
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&count)
 	return count, err
 }
 
