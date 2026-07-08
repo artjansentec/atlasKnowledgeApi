@@ -85,8 +85,10 @@ func main() {
 	authHandler := handler.NewAuthHandler(cfg, authSvc)
 	projectHandler := handler.NewProjectHandler(cfg, projectSvc, userRepo, tagRepo, fileRepo)
 	sectionHandler := handler.NewSectionHandler(sectionSvc)
+	devSectionHandler := handler.NewDevSectionHandler(sectionSvc)
 	lessonHandler := handler.NewLessonHandler(lessonSvc)
 	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc)
+	devAttachmentHandler := handler.NewDevAttachmentHandler(attachmentSvc)
 	searchHandler := handler.NewSearchHandler(searchSvc)
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	userHandler := handler.NewUserHandler(userSvc)
@@ -116,6 +118,7 @@ func main() {
 	protected.GET("/dashboard/summary", dashboardHandler.Summary)
 	protected.GET("/search", searchHandler.Search, searchLimiter.Middleware())
 
+	protected.GET("/project-statuses", projectHandler.ListStatuses)
 	protected.GET("/projects", projectHandler.List)
 	protected.GET("/projects/:slug", projectHandler.Get)
 	protected.POST("/projects", projectHandler.Create)
@@ -128,12 +131,21 @@ func main() {
 	protected.DELETE("/projects/:slug/sections/:sectionId", sectionHandler.Delete)
 	protected.PUT("/projects/:slug/sections/reorder", sectionHandler.Reorder)
 
+	protected.POST("/projects/:slug/dev-sections", devSectionHandler.Create)
+	protected.PATCH("/projects/:slug/dev-sections/:sectionId", devSectionHandler.Patch)
+	protected.DELETE("/projects/:slug/dev-sections/:sectionId", devSectionHandler.Delete)
+	protected.PUT("/projects/:slug/dev-sections/reorder", devSectionHandler.Reorder)
+
 	protected.POST("/projects/:slug/lessons", lessonHandler.Create)
 	protected.PATCH("/projects/:slug/lessons/:lessonId", lessonHandler.Patch)
 	protected.DELETE("/projects/:slug/lessons/:lessonId", lessonHandler.Delete)
 
 	protected.POST("/projects/:slug/attachments", attachmentHandler.Upload)
 	protected.DELETE("/projects/:slug/attachments/:attachmentId", attachmentHandler.Delete)
+
+	protected.POST("/projects/:slug/dev-attachments", devAttachmentHandler.Upload)
+	protected.DELETE("/projects/:slug/dev-attachments/:attachmentId", devAttachmentHandler.Delete)
+
 	protected.GET("/files/:fileId/download", attachmentHandler.Download)
 
 	go func() {

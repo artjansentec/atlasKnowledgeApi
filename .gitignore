@@ -1,0 +1,44 @@
+# Variáveis de ambiente e segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Binários compilados
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Uploads / arquivos de storage gerados em runtime
+storage/*
+!storage/.gitkeep
+
+# Dependências e artefatos Go
+vendor/
+go.work
+go.work.sum
+
+# Cobertura de testes
+coverage.out
+coverage.html
+*.cover
+
+# Logs
+*.log
+logs/
+
+# Arquivos de IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
