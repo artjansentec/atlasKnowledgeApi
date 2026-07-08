@@ -33,6 +33,86 @@ Backend da plataforma de conhecimento interno. Oferece autenticação JWT, CRUD 
 
 **Perfis de acesso:** `admin`, `consultor` e `desenvolvedor`. A aba **Desenvolvimento** (seções e anexos técnicos) só é visível para `admin` e `desenvolvedor`; a edição fica restrita a `admin` e aos dev-responsáveis do projeto.
 
+### Fluxo principal
+
+```mermaid
+flowchart TD
+    U["👤 Usuário / Front"]
+
+    %% Autenticação
+    U -->|POST /auth/login| B["🔐 Auth JWT"]
+    B -->|access token 15m| C["🛡️ Rotas protegidas /api/v1"]
+    B -.->|refresh token via cookie| R["🔄 POST /auth/refresh"]
+    R -.->|novo access token| C
+    U -->|POST /auth/logout| B
+    U -->|GET /auth/me| C
+    C --> MW["🧱 Middleware<br/>RequireAuth + CORS + RateLimit"]
+
+    %% Utilitários
+    U -->|GET /health| HC["💓 Health check DB"]
+    C --> USR["👥 GET /users"]
+    C -->|GET /project-statuses| ST["🏷️ Status configuráveis<br/>label + cores"]
+
+    %% Projetos
+    MW --> LP["📋 GET /projects<br/>lista + filtros status/q/responsável"]
+    LP --> D["📄 GET /projects/:slug<br/>detalhe do projeto"]
+    ST -.->|badge / select| D
+
+    subgraph Admin["👑 Ações de admin"]
+        NP["➕ POST /projects<br/>criar projeto"]
+        RD["👁️ PUT /readers<br/>define leitores"]
+        DL["🗑️ DELETE /projects/:slug"]
+    end
+    MW --> Admin
+    NP --> D
+    MW --> PP["✏️ PATCH /projects/:slug<br/>nome, status, tags, tech, dev-resp."]
+    PP --> D
+
+    %% Abas por perfil
+    D --> PT["📁 Aba Projeto<br/>seções doc + anexos"]
+    D --> PERM{"🧭 Perfil"}
+    PERM -->|admin / desenvolvedor| DEV["🛠️ Aba Desenvolvimento<br/>dev-sections + dev-attachments"]
+    PERM -->|consultor| NO["🚫 Sem aba Desenvolvimento"]
+    DEV -.->|editar| WHO{"🔑 admin ou<br/>dev-responsável?"}
+    WHO -->|sim| EDIT["✅ Cria / edita / reordena"]
+    WHO -->|não| RO["🔒 Somente leitura"]
+
+    %% Conteúdo do projeto
+    PT --> SEC["🌳 Seções em árvore<br/>CRUD + reorder"]
+    D --> LES["💡 Lições aprendidas<br/>problem / attention / future / success"]
+    D --> TGS["🔖 Tags gerais + Tech"]
+    PT --> ATT["📎 Upload anexo"]
+    DEV --> ATT
+    ATT --> STO[("💾 Storage local")]
+    PT --> FD["⬇️ GET /files/:id/download"]
+    DEV --> FD
+    FD --> STO
+
+    %% Busca e dashboard
+    MW --> SD["🔍 Busca /search<br/>📊 Dashboard /dashboard/summary<br/>filtro por período"]
+
+    %% Persistência
+    LP --> DB[("🐘 PostgreSQL")]
+    D --> DB
+    SEC --> DB
+    LES --> DB
+    ATT --> DB
+    SD --> DB
+    NP --> AUD["📝 Audit log"]
+    EDIT --> AUD
+    PP --> AUD
+    AUD --> DB
+
+    classDef auth fill:#0f766e,stroke:#134e4a,color:#fff;
+    classDef admin fill:#7c2d12,stroke:#431407,color:#fff;
+    classDef dev fill:#1e3a8a,stroke:#172554,color:#fff;
+    classDef store fill:#3730a3,stroke:#1e1b4b,color:#fff;
+    class B,R,MW auth;
+    class NP,RD,DL,Admin admin;
+    class DEV,EDIT dev;
+    class DB,STO,AUD store;
+```
+
 <table>
 <tr>
 <td width="60" align="center"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/go/go-original.svg" width="36" alt="Go" /></td>
