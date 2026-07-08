@@ -17,13 +17,13 @@ func NewSectionRepository(database *db.DB) *SectionRepository {
 	return &SectionRepository{db: database}
 }
 
-func (r *SectionRepository) ListByProject(ctx context.Context, projectID string) ([]domain.Section, error) {
+func (r *SectionRepository) ListByProject(ctx context.Context, projectID string, kind domain.SectionKind) ([]domain.Section, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, project_id, parent_id, title, content, sort_order, created_at, updated_at, deleted_at
+		SELECT id, project_id, parent_id, title, content, kind, sort_order, created_at, updated_at, deleted_at
 		FROM project_sections
-		WHERE project_id = $1 AND deleted_at IS NULL
+		WHERE project_id = $1 AND kind = $2 AND deleted_at IS NULL
 		ORDER BY sort_order, title
-	`, projectID)
+	`, projectID, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func (r *SectionRepository) ListByProject(ctx context.Context, projectID string)
 	var sections []domain.Section
 	for rows.Next() {
 		var s domain.Section
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ParentID, &s.Title, &s.Content, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ParentID, &s.Title, &s.Content, &s.Kind, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt); err != nil {
 			return nil, err
 		}
 		sections = append(sections, s)
@@ -40,13 +40,13 @@ func (r *SectionRepository) ListByProject(ctx context.Context, projectID string)
 	return sections, rows.Err()
 }
 
-func (r *SectionRepository) GetByID(ctx context.Context, projectID, sectionID string) (*domain.Section, error) {
+func (r *SectionRepository) GetByID(ctx context.Context, projectID, sectionID string, kind domain.SectionKind) (*domain.Section, error) {
 	var s domain.Section
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT id, project_id, parent_id, title, content, sort_order, created_at, updated_at, deleted_at
+		SELECT id, project_id, parent_id, title, content, kind, sort_order, created_at, updated_at, deleted_at
 		FROM project_sections
-		WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL
-	`, sectionID, projectID).Scan(&s.ID, &s.ProjectID, &s.ParentID, &s.Title, &s.Content, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt)
+		WHERE id = $1 AND project_id = $2 AND kind = $3 AND deleted_at IS NULL
+	`, sectionID, projectID, kind).Scan(&s.ID, &s.ProjectID, &s.ParentID, &s.Title, &s.Content, &s.Kind, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -57,12 +57,17 @@ func (r *SectionRepository) GetByID(ctx context.Context, projectID, sectionID st
 }
 
 func (r *SectionRepository) Create(ctx context.Context, tx pgx.Tx, s *domain.Section) error {
+	kind := s.Kind
+	if kind == "" {
+		kind = domain.SectionDoc
+	}
 	query := `
-		INSERT INTO project_sections (project_id, parent_id, title, content, sort_order)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO project_sections (project_id, parent_id, title, content, kind, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at, updated_at
 	`
-	args := []interface{}{s.ProjectID, s.ParentID, s.Title, s.Content, s.SortOrder}
+	args := []interface{}{s.ProjectID, s.ParentID, s.Title, s.Content, kind, s.SortOrder}
+	s.Kind = kind
 	if tx != nil {
 		return tx.QueryRow(ctx, query, args...).Scan(&s.ID, &s.CreatedAt, &s.UpdatedAt)
 	}
@@ -84,7 +89,7 @@ func (r *SectionRepository) SoftDelete(ctx context.Context, sectionID string) er
 	return err
 }
 
-func (r *SectionRepository) Reorder(ctx context.Context, projectID string, items []domain.SectionReorderItem) error {
+func (r *SectionRepository) Reorder(ctx context.Context, projectID string, kind domain.SectionKind, items []domain.SectionReorderItem) error {
 	tx, err := r.db.Pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -94,8 +99,8 @@ func (r *SectionRepository) Reorder(ctx context.Context, projectID string, items
 	for _, item := range items {
 		if _, err := tx.Exec(ctx, `
 			UPDATE project_sections SET parent_id = $3, sort_order = $4
-			WHERE id = $1 AND project_id = $2 AND deleted_at IS NULL
-		`, item.ID, projectID, item.ParentID, item.SortOrder); err != nil {
+			WHERE id = $1 AND project_id = $2 AND kind = $5 AND deleted_at IS NULL
+		`, item.ID, projectID, item.ParentID, item.SortOrder, kind); err != nil {
 			return err
 		}
 	}
@@ -106,7 +111,7 @@ func (r *SectionRepository) CountByProjects(ctx context.Context, projectIDs []st
 	if projectIDs != nil && len(projectIDs) == 0 {
 		return 0, nil
 	}
-	query := `SELECT COUNT(*) FROM project_sections WHERE deleted_at IS NULL`
+	query := `SELECT COUNT(*) FROM project_sections WHERE deleted_at IS NULL AND kind = 'doc'`
 	args := []interface{}{}
 	idx := 1
 
@@ -133,9 +138,9 @@ func (r *SectionRepository) Search(ctx context.Context, query string, allowedIDs
 	}
 	pattern := likePattern(query)
 	sql := `
-		SELECT id, project_id, parent_id, title, content, sort_order, created_at, updated_at, deleted_at
+		SELECT id, project_id, parent_id, title, content, kind, sort_order, created_at, updated_at, deleted_at
 		FROM project_sections
-		WHERE deleted_at IS NULL
+		WHERE deleted_at IS NULL AND kind = 'doc'
 		  AND (LOWER(title) LIKE $1 OR LOWER(content) LIKE $1)
 	`
 	args := []interface{}{pattern}
@@ -154,7 +159,7 @@ func (r *SectionRepository) Search(ctx context.Context, query string, allowedIDs
 	var sections []domain.Section
 	for rows.Next() {
 		var s domain.Section
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ParentID, &s.Title, &s.Content, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.ProjectID, &s.ParentID, &s.Title, &s.Content, &s.Kind, &s.SortOrder, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt); err != nil {
 			return nil, err
 		}
 		sections = append(sections, s)
@@ -162,11 +167,11 @@ func (r *SectionRepository) Search(ctx context.Context, query string, allowedIDs
 	return sections, rows.Err()
 }
 
-func (r *SectionRepository) NextSortOrder(ctx context.Context, projectID string, parentID *string) (int, error) {
+func (r *SectionRepository) NextSortOrder(ctx context.Context, projectID string, parentID *string, kind domain.SectionKind) (int, error) {
 	var order int
 	err := r.db.Pool.QueryRow(ctx, `
 		SELECT COALESCE(MAX(sort_order), -1) + 1 FROM project_sections
-		WHERE project_id = $1 AND (($2::uuid IS NULL AND parent_id IS NULL) OR parent_id = $2) AND deleted_at IS NULL
-	`, projectID, parentID).Scan(&order)
+		WHERE project_id = $1 AND kind = $3 AND (($2::uuid IS NULL AND parent_id IS NULL) OR parent_id = $2) AND deleted_at IS NULL
+	`, projectID, parentID, kind).Scan(&order)
 	return order, err
 }

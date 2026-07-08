@@ -10,22 +10,26 @@ import (
 )
 
 type ProjectResponse struct {
-	ID          string               `json:"id"`
-	Slug        string               `json:"slug"`
-	Name        string               `json:"name"`
-	Description string               `json:"description"`
-	Status      string               `json:"status"`
-	Responsible string               `json:"responsible"`
-	Readers     []string             `json:"readers,omitempty"`
-	Client      *string              `json:"client,omitempty"`
-	CreatedAt   string               `json:"createdAt"`
-	UpdatedAt   string               `json:"updatedAt"`
-	Tags        []string             `json:"tags"`
-	Tech        []string             `json:"tech,omitempty"`
-	Attachments []AttachmentResponse `json:"attachments"`
-	Lessons     []LessonResponse     `json:"lessons"`
-	Sections    []SectionResponse    `json:"sections"`
-	History     []HistoryResponse    `json:"history"`
+	ID                string               `json:"id"`
+	Slug              string               `json:"slug"`
+	Name              string               `json:"name"`
+	Description       string               `json:"description"`
+	Status            string               `json:"status"`
+	Responsible       string               `json:"responsible"`
+	Readers           []string             `json:"readers,omitempty"`
+	Client            *string              `json:"client,omitempty"`
+	CreatedAt         string               `json:"createdAt"`
+	UpdatedAt         string               `json:"updatedAt"`
+	Tags              []string             `json:"tags"`
+	Tech              []string             `json:"tech,omitempty"`
+	DevResponsibles   []string             `json:"devResponsibles"`
+	DevResponsibleIds []string             `json:"devResponsibleIds,omitempty"`
+	Attachments       []AttachmentResponse `json:"attachments"`
+	DevAttachments    []AttachmentResponse `json:"devAttachments"`
+	Lessons           []LessonResponse     `json:"lessons"`
+	Sections          []SectionResponse    `json:"sections"`
+	DevSections       []SectionResponse    `json:"devSections"`
+	History           []HistoryResponse    `json:"history"`
 }
 
 type ProjectListItem struct {
@@ -41,6 +45,25 @@ type ProjectListItem struct {
 	UpdatedAt   string   `json:"updatedAt"`
 	Tags        []string `json:"tags"`
 	Tech        []string `json:"tech,omitempty"`
+}
+
+type ProjectStatusResponse struct {
+	Code       string `json:"code"`
+	Label      string `json:"label"`
+	Color      string `json:"color"`
+	Background string `json:"background"`
+	SortOrder  int    `json:"sortOrder"`
+}
+
+func ToProjectStatusList(items []domain.ProjectStatusMeta) []ProjectStatusResponse {
+	out := make([]ProjectStatusResponse, 0, len(items))
+	for _, s := range items {
+		out = append(out, ProjectStatusResponse{
+			Code: s.Code, Label: s.Label, Color: s.Color,
+			Background: s.Background, SortOrder: s.SortOrder,
+		})
+	}
+	return out
 }
 
 type AttachmentResponse struct {
@@ -72,36 +95,46 @@ type HistoryResponse struct {
 }
 
 type ProjectBuildInput struct {
-	Project     domain.Project
-	Responsible string
-	ReaderNames []string
-	Tags        []string
-	Tech        []string
-	Sections    []domain.Section
-	Lessons     []domain.Lesson
-	LessonTags  map[string][]string
-	Attachments []domain.Attachment
-	Files       map[string]domain.FileRecord
-	History     []domain.AuditEvent
-	AuthorNames map[string]string
-	APIBaseURL  string
+	Project           domain.Project
+	Responsible       string
+	ReaderNames       []string
+	Tags              []string
+	Tech              []string
+	DevResponsibles   []string
+	DevResponsibleIDs []string
+	Sections          []domain.Section
+	DevSections       []domain.Section
+	Lessons           []domain.Lesson
+	LessonTags        map[string][]string
+	Attachments       []domain.Attachment
+	DevAttachments    []domain.Attachment
+	Files             map[string]domain.FileRecord
+	History           []domain.AuditEvent
+	AuthorNames       map[string]string
+	APIBaseURL        string
 }
 
-func ToProjectResponse(in ProjectBuildInput) ProjectResponse {
-	attachments := make([]AttachmentResponse, 0, len(in.Attachments))
-	for _, a := range in.Attachments {
-		file := in.Files[a.FileID]
+func buildAttachments(items []domain.Attachment, files map[string]domain.FileRecord, apiBaseURL string) []AttachmentResponse {
+	out := make([]AttachmentResponse, 0, len(items))
+	for _, a := range items {
+		file := files[a.FileID]
 		name := file.OriginalName
 		if a.DisplayName != nil && *a.DisplayName != "" {
 			name = *a.DisplayName
 		}
-		url := fmt.Sprintf("%s/api/v1/files/%s/download", strings.TrimRight(in.APIBaseURL, "/"), file.ID)
-		attachments = append(attachments, AttachmentResponse{
+		url := fmt.Sprintf("%s/api/v1/files/%s/download", strings.TrimRight(apiBaseURL, "/"), file.ID)
+		out = append(out, AttachmentResponse{
 			ID: a.ID, Name: name, Type: strings.TrimPrefix(filepath.Ext(name), "."),
 			MimeType: &file.MimeType, Size: HumanSize(file.SizeBytes),
 			UploadedAt: FormatDate(file.CreatedAt), URL: &url,
 		})
 	}
+	return out
+}
+
+func ToProjectResponse(in ProjectBuildInput) ProjectResponse {
+	attachments := buildAttachments(in.Attachments, in.Files, in.APIBaseURL)
+	devAttachments := buildAttachments(in.DevAttachments, in.Files, in.APIBaseURL)
 
 	lessons := make([]LessonResponse, 0, len(in.Lessons))
 	for _, l := range in.Lessons {
@@ -126,14 +159,22 @@ func ToProjectResponse(in ProjectBuildInput) ProjectResponse {
 		})
 	}
 
+	devResponsibles := in.DevResponsibles
+	if devResponsibles == nil {
+		devResponsibles = []string{}
+	}
+
 	return ProjectResponse{
 		ID: in.Project.ID, Slug: in.Project.Slug, Name: in.Project.Name,
 		Description: in.Project.Description, Status: string(in.Project.Status),
 		Responsible: in.Responsible, Readers: in.ReaderNames, Client: in.Project.Client,
 		CreatedAt: FormatDate(in.Project.CreatedAt), UpdatedAt: FormatDate(in.Project.UpdatedAt),
 		Tags: in.Tags, Tech: in.Tech,
-		Attachments: attachments, Lessons: lessons,
-		Sections: BuildSectionTree(in.Sections), History: history,
+		DevResponsibles: devResponsibles, DevResponsibleIds: in.DevResponsibleIDs,
+		Attachments: attachments, DevAttachments: devAttachments, Lessons: lessons,
+		Sections:    BuildSectionTree(in.Sections),
+		DevSections: BuildSectionTree(in.DevSections),
+		History:     history,
 	}
 }
 

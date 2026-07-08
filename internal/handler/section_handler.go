@@ -12,10 +12,15 @@ import (
 
 type SectionHandler struct {
 	sections *service.SectionService
+	kind     domain.SectionKind
 }
 
 func NewSectionHandler(sections *service.SectionService) *SectionHandler {
-	return &SectionHandler{sections: sections}
+	return &SectionHandler{sections: sections, kind: domain.SectionDoc}
+}
+
+func NewDevSectionHandler(sections *service.SectionService) *SectionHandler {
+	return &SectionHandler{sections: sections, kind: domain.SectionDev}
 }
 
 type createSectionRequest struct {
@@ -29,7 +34,7 @@ func (h *SectionHandler) Create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return Error(c, httperr.BadRequest("corpo da requisição inválido"))
 	}
-	section, err := h.sections.Create(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), service.CreateSectionInput{
+	section, err := h.sections.Create(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), h.kind, service.CreateSectionInput{
 		Title: req.Title, Content: req.Content, ParentID: req.ParentID,
 	})
 	if err != nil {
@@ -50,7 +55,7 @@ func (h *SectionHandler) Patch(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return Error(c, httperr.BadRequest("corpo da requisição inválido"))
 	}
-	section, err := h.sections.Patch(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), c.Param("sectionId"), service.PatchSectionInput{
+	section, err := h.sections.Patch(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), c.Param("sectionId"), h.kind, service.PatchSectionInput{
 		Title: req.Title, Content: req.Content,
 	})
 	if err != nil {
@@ -62,7 +67,7 @@ func (h *SectionHandler) Patch(c echo.Context) error {
 }
 
 func (h *SectionHandler) Delete(c echo.Context) error {
-	if err := h.sections.Delete(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), c.Param("sectionId")); err != nil {
+	if err := h.sections.Delete(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), c.Param("sectionId"), h.kind); err != nil {
 		return Error(c, err)
 	}
 	return NoContent(c)
@@ -85,7 +90,7 @@ func (h *SectionHandler) Reorder(c echo.Context) error {
 	for i, item := range req.Items {
 		items[i] = domain.SectionReorderItem{ID: item.ID, ParentID: item.ParentID, SortOrder: item.SortOrder}
 	}
-	if err := h.sections.Reorder(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), items); err != nil {
+	if err := h.sections.Reorder(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), h.kind, items); err != nil {
 		return Error(c, err)
 	}
 	return NoContent(c)

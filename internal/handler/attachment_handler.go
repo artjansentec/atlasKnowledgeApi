@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/atlas/knowledge-api/internal/domain"
 	"github.com/atlas/knowledge-api/internal/middleware"
 	"github.com/atlas/knowledge-api/internal/service"
 	"github.com/atlas/knowledge-api/pkg/httperr"
@@ -13,10 +14,15 @@ import (
 
 type AttachmentHandler struct {
 	attachments *service.AttachmentService
+	kind        domain.AttachmentKind
 }
 
 func NewAttachmentHandler(attachments *service.AttachmentService) *AttachmentHandler {
-	return &AttachmentHandler{attachments: attachments}
+	return &AttachmentHandler{attachments: attachments, kind: domain.AttachmentProject}
+}
+
+func NewDevAttachmentHandler(attachments *service.AttachmentService) *AttachmentHandler {
+	return &AttachmentHandler{attachments: attachments, kind: domain.AttachmentDev}
 }
 
 func (h *AttachmentHandler) Upload(c echo.Context) error {
@@ -31,7 +37,7 @@ func (h *AttachmentHandler) Upload(c echo.Context) error {
 	defer src.Close()
 
 	attachment, file, err := h.attachments.Upload(
-		c.Request().Context(), middleware.GetUser(c), c.Param("slug"),
+		c.Request().Context(), middleware.GetUser(c), c.Param("slug"), h.kind,
 		fileHeader.Filename, fileHeader.Size, src,
 	)
 	if err != nil {
@@ -43,7 +49,7 @@ func (h *AttachmentHandler) Upload(c echo.Context) error {
 }
 
 func (h *AttachmentHandler) Delete(c echo.Context) error {
-	if err := h.attachments.Delete(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), c.Param("attachmentId")); err != nil {
+	if err := h.attachments.Delete(c.Request().Context(), middleware.GetUser(c), c.Param("slug"), h.kind, c.Param("attachmentId")); err != nil {
 		return Error(c, err)
 	}
 	return NoContent(c)

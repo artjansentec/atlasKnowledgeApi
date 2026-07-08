@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/atlas/knowledge-api/internal/config"
@@ -55,13 +57,23 @@ func (h *ProjectHandler) List(c echo.Context) error {
 	return JSON(c, http.StatusOK, items)
 }
 
+// ListStatuses devolve os status disponíveis (com rótulo e cores) para o front
+// montar o select e os badges. Fonte de verdade: tabela project_statuses.
+func (h *ProjectHandler) ListStatuses(c echo.Context) error {
+	statuses, err := h.projects.ListStatuses(c.Request().Context())
+	if err != nil {
+		return Error(c, err)
+	}
+	return JSON(c, http.StatusOK, mapper.ToProjectStatusList(statuses))
+}
+
 func (h *ProjectHandler) Get(c echo.Context) error {
 	user := middleware.GetUser(c)
 	project, _, err := h.projects.GetBySlug(c.Request().Context(), user, c.Param("slug"))
 	if err != nil {
 		return Error(c, err)
 	}
-	resp, err := h.buildDetail(c.Request().Context(), *project)
+	resp, err := h.buildDetail(c.Request().Context(), user, *project)
 	if err != nil {
 		return Error(c, err)
 	}
@@ -69,16 +81,17 @@ func (h *ProjectHandler) Get(c echo.Context) error {
 }
 
 type createProjectRequest struct {
-	Name              string   `json:"name"`
-	Slug              string   `json:"slug"`
-	Description       string   `json:"description"`
-	Status            string   `json:"status"`
-	ResponsibleUserID string   `json:"responsibleUserId"`
-	Client            *string  `json:"client"`
-	Tags              []string `json:"tags"`
-	Tech              []string `json:"tech"`
-	SectionTitle      string   `json:"sectionTitle"`
-	SectionContent    string   `json:"sectionContent"`
+	Name                  string   `json:"name"`
+	Slug                  string   `json:"slug"`
+	Description           string   `json:"description"`
+	Status                string   `json:"status"`
+	ResponsibleUserID     string   `json:"responsibleUserId"`
+	DevResponsibleUserIDs []string `json:"devResponsibleUserIds"`
+	Client                *string  `json:"client"`
+	Tags                  []string `json:"tags"`
+	Tech                  []string `json:"tech"`
+	SectionTitle          string   `json:"sectionTitle"`
+	SectionContent        string   `json:"sectionContent"`
 }
 
 func (h *ProjectHandler) Create(c echo.Context) error {
@@ -89,13 +102,14 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 	}
 	project, err := h.projects.Create(c.Request().Context(), user, service.CreateProjectInput{
 		Name: req.Name, Slug: req.Slug, Description: req.Description, Status: req.Status,
-		ResponsibleUserID: req.ResponsibleUserID, Client: req.Client,
-		Tags: req.Tags, Tech: req.Tech, SectionTitle: req.SectionTitle, SectionContent: req.SectionContent,
+		ResponsibleUserID: req.ResponsibleUserID, DevResponsibleUserIDs: req.DevResponsibleUserIDs,
+		Client: req.Client,
+		Tags:   req.Tags, Tech: req.Tech, SectionTitle: req.SectionTitle, SectionContent: req.SectionContent,
 	})
 	if err != nil {
 		return Error(c, err)
 	}
-	resp, err := h.buildDetail(c.Request().Context(), *project)
+	resp, err := h.buildDetail(c.Request().Context(), user, *project)
 	if err != nil {
 		return Error(c, err)
 	}
@@ -103,36 +117,48 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 }
 
 type patchProjectRequest struct {
-	Name              *string  `json:"name"`
-	Description       *string  `json:"description"`
-	Status            *string  `json:"status"`
-	ResponsibleUserID *string  `json:"responsibleUserId"`
-	Client            *string  `json:"client"`
-	Tags              []string `json:"tags"`
-	Tech              []string `json:"tech"`
+	Name                  *string  `json:"name"`
+	Description           *string  `json:"description"`
+	Status                *string  `json:"status"`
+	ResponsibleUserID     *string  `json:"responsibleUserId"`
+	DevResponsibleUserIDs []string `json:"devResponsibleUserIds"`
+	Client                *string  `json:"client"`
+	Tags                  []string `json:"tags"`
+	Tech                  []string `json:"tech"`
 }
 
 func (h *ProjectHandler) Patch(c echo.Context) error {
 	user := middleware.GetUser(c)
-	var req patchProjectRequest
-	if err := c.Bind(&req); err != nil {
+
+	raw, err := io.ReadAll(c.Request().Body)
+	if err != nil {
 		return Error(c, httperr.BadRequest("corpo da requisição inválido"))
 	}
+	var req patchProjectRequest
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &req); err != nil {
+			return Error(c, httperr.BadRequest("corpo da requisição inválido"))
+		}
+	}
 	body := map[string]interface{}{}
-	_ = c.Bind(&body)
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &body)
+	}
 	_, hasTags := body["tags"]
 	_, hasTech := body["tech"]
 	_, hasClient := body["client"]
+	_, hasDevResponsibles := body["devResponsibleUserIds"]
 
 	project, err := h.projects.Patch(c.Request().Context(), user, c.Param("slug"), service.PatchProjectInput{
 		Name: req.Name, Description: req.Description, Status: req.Status,
 		ResponsibleUserID: req.ResponsibleUserID, Client: req.Client, HasClient: hasClient,
+		DevResponsibleUserIDs: req.DevResponsibleUserIDs, HasDevResponsibles: hasDevResponsibles,
 		Tags: req.Tags, Tech: req.Tech, HasTags: hasTags, HasTech: hasTech,
 	})
 	if err != nil {
 		return Error(c, err)
 	}
-	resp, err := h.buildDetail(c.Request().Context(), *project)
+	resp, err := h.buildDetail(c.Request().Context(), user, *project)
 	if err != nil {
 		return Error(c, err)
 	}
@@ -171,7 +197,7 @@ func (h *ProjectHandler) buildListItem(ctx context.Context, p domain.Project) (m
 	return mapper.ToProjectListItem(p, responsible, readers, tags, tech), nil
 }
 
-func (h *ProjectHandler) buildDetail(ctx context.Context, p domain.Project) (mapper.ProjectResponse, error) {
+func (h *ProjectHandler) buildDetail(ctx context.Context, user domain.User, p domain.Project) (mapper.ProjectResponse, error) {
 	responsible, tags, tech, readerNames, err := h.loadMeta(ctx, p)
 	if err != nil {
 		return mapper.ProjectResponse{}, err
@@ -182,9 +208,42 @@ func (h *ProjectHandler) buildDetail(ctx context.Context, p domain.Project) (map
 		return mapper.ProjectResponse{}, httperr.Internal("falha ao carregar projeto")
 	}
 
+	devResponsibleIDs, err := h.projects.DevResponsibleIDs(ctx, p.ID)
+	if err != nil {
+		return mapper.ProjectResponse{}, httperr.Internal("falha ao carregar dev-responsáveis")
+	}
+	devNameMap, _ := h.users.GetNamesByIDs(ctx, devResponsibleIDs)
+	devResponsibles := make([]string, 0, len(devResponsibleIDs))
+	for _, id := range devResponsibleIDs {
+		if name, ok := devNameMap[id]; ok {
+			devResponsibles = append(devResponsibles, name)
+		}
+	}
+
+	// A aba Desenvolvimento (devSections/devAttachments) só é entregue a admin e
+	// desenvolvedores; consultores recebem listas vazias.
+	var devSections []domain.Section
+	var devAttachments []domain.Attachment
+	if service.CanSeeDevSections(user) {
+		devSections, err = h.projects.LoadDevSections(ctx, p.ID)
+		if err != nil {
+			return mapper.ProjectResponse{}, httperr.Internal("falha ao carregar dev-sections")
+		}
+		devAttachments, err = h.projects.LoadDevAttachments(ctx, p.ID)
+		if err != nil {
+			return mapper.ProjectResponse{}, httperr.Internal("falha ao carregar dev-attachments")
+		}
+	}
+
 	lessonTags, _ := h.tags.ListLessonTagsByProject(ctx, p.ID)
 	fileMap := make(map[string]domain.FileRecord)
 	for _, a := range attachments {
+		f, _ := h.files.GetByID(ctx, a.FileID)
+		if f != nil {
+			fileMap[f.ID] = *f
+		}
+	}
+	for _, a := range devAttachments {
 		f, _ := h.files.GetByID(ctx, a.FileID)
 		if f != nil {
 			fileMap[f.ID] = *f
@@ -201,8 +260,10 @@ func (h *ProjectHandler) buildDetail(ctx context.Context, p domain.Project) (map
 
 	return mapper.ToProjectResponse(mapper.ProjectBuildInput{
 		Project: p, Responsible: responsible, ReaderNames: readerNames,
-		Tags: tags, Tech: tech, Sections: sections, Lessons: lessons,
-		LessonTags: lessonTags, Attachments: attachments, Files: fileMap,
+		Tags: tags, Tech: tech,
+		DevResponsibles: devResponsibles, DevResponsibleIDs: devResponsibleIDs,
+		Sections: sections, DevSections: devSections, Lessons: lessons,
+		LessonTags: lessonTags, Attachments: attachments, DevAttachments: devAttachments, Files: fileMap,
 		History: history, AuthorNames: authorNames, APIBaseURL: h.cfg.APIBaseURL,
 	}), nil
 }

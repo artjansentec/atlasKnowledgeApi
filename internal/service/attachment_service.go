@@ -47,12 +47,28 @@ func NewAttachmentService(
 	}
 }
 
-func (s *AttachmentService) Upload(ctx context.Context, user domain.User, slug, originalName string, size int64, reader io.Reader) (*domain.Attachment, *domain.FileRecord, error) {
+// authorizeWrite valida a permissão de escrita conforme o tipo de anexo:
+// projeto → admin ou responsável; desenvolvimento → admin ou dev-responsável.
+func (s *AttachmentService) authorizeWrite(ctx context.Context, user domain.User, project domain.Project, kind domain.AttachmentKind) error {
+	if kind == domain.AttachmentDev {
+		devIDs, err := s.projects.ListDevResponsibleIDs(ctx, project.ID)
+		if err != nil {
+			return httperr.Internal("falha ao carregar dev-responsáveis")
+		}
+		if !CanManageDevSections(user, devIDs) {
+			return httperr.Forbidden("sem permissão para editar anexos da aba Desenvolvimento")
+		}
+		return nil
+	}
+	return requireManage(user, project)
+}
+
+func (s *AttachmentService) Upload(ctx context.Context, user domain.User, slug string, kind domain.AttachmentKind, originalName string, size int64, reader io.Reader) (*domain.Attachment, *domain.FileRecord, error) {
 	project, err := s.projects.GetBySlug(ctx, slug)
 	if err != nil || project == nil {
 		return nil, nil, httperr.NotFound("projeto não encontrado")
 	}
-	if err := requireManage(user, *project); err != nil {
+	if err := s.authorizeWrite(ctx, user, *project, kind); err != nil {
 		return nil, nil, err
 	}
 	if size > s.cfg.MaxUploadBytes {
@@ -97,7 +113,7 @@ func (s *AttachmentService) Upload(ctx context.Context, user domain.User, slug, 
 		return nil, nil, httperr.Internal("falha ao registrar arquivo")
 	}
 
-	attachment := &domain.Attachment{ProjectID: project.ID, FileID: file.ID, DisplayName: &originalName}
+	attachment := &domain.Attachment{ProjectID: project.ID, FileID: file.ID, DisplayName: &originalName, Kind: kind}
 	if err := s.attachments.Create(ctx, tx, attachment); err != nil {
 		return nil, nil, httperr.Internal("falha ao vincular anexo")
 	}
@@ -115,13 +131,18 @@ func (s *AttachmentService) Upload(ctx context.Context, user domain.User, slug, 
 	return attachment, file, nil
 }
 
-func (s *AttachmentService) Delete(ctx context.Context, user domain.User, slug, attachmentID string) error {
+func (s *AttachmentService) Delete(ctx context.Context, user domain.User, slug string, kind domain.AttachmentKind, attachmentID string) error {
 	project, err := s.projects.GetBySlug(ctx, slug)
 	if err != nil || project == nil {
 		return httperr.NotFound("projeto não encontrado")
 	}
-	if err := requireManage(user, *project); err != nil {
+	if err := s.authorizeWrite(ctx, user, *project, kind); err != nil {
 		return err
+	}
+
+	existing, err := s.attachments.GetByID(ctx, project.ID, attachmentID)
+	if err != nil || existing == nil || existing.Kind != kind {
+		return httperr.NotFound("anexo não encontrado")
 	}
 
 	attachment, err := s.attachments.Delete(ctx, attachmentID)
@@ -147,13 +168,38 @@ func (s *AttachmentService) Delete(ctx context.Context, user domain.User, slug, 
 	return nil
 }
 
+// canReadAttachment define quem baixa um arquivo. Arquivos de projeto exigem
+// acesso de leitura ao projeto; arquivos de desenvolvimento exigem, além disso,
+// visibilidade da aba Desenvolvimento (admin/desenvolvedor ou dev-responsável).
+func (s *AttachmentService) canReadAttachment(ctx context.Context, user domain.User, project domain.Project, members []domain.ProjectMember, kind domain.AttachmentKind) bool {
+	baseRead := CanReadProject(user, project, members)
+	if !baseRead {
+		devIDs, err := s.projects.ListDevResponsibleIDs(ctx, project.ID)
+		if err == nil {
+			for _, id := range devIDs {
+				if id == user.ID {
+					baseRead = true
+					break
+				}
+			}
+		}
+	}
+	if !baseRead {
+		return false
+	}
+	if kind == domain.AttachmentDev {
+		return CanSeeDevSections(user)
+	}
+	return true
+}
+
 func (s *AttachmentService) Download(ctx context.Context, user domain.User, fileID string) (*domain.FileRecord, io.ReadCloser, error) {
 	file, err := s.files.GetByID(ctx, fileID)
 	if err != nil || file == nil {
 		return nil, nil, httperr.NotFound("arquivo não encontrado")
 	}
 
-	projectID, err := s.attachments.GetProjectByFileID(ctx, fileID)
+	projectID, kind, err := s.attachments.GetProjectAndKindByFileID(ctx, fileID)
 	if err != nil || projectID == "" {
 		return nil, nil, httperr.NotFound("arquivo não vinculado a projeto")
 	}
@@ -166,7 +212,7 @@ func (s *AttachmentService) Download(ctx context.Context, user domain.User, file
 	if err != nil {
 		return nil, nil, httperr.Internal("falha ao verificar permissão")
 	}
-	if !CanReadProject(user, *project, members) {
+	if !s.canReadAttachment(ctx, user, *project, members, kind) {
 		return nil, nil, httperr.Forbidden("sem permissão para baixar este arquivo")
 	}
 

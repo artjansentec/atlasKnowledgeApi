@@ -82,29 +82,32 @@ func NewProjectService(
 }
 
 type CreateProjectInput struct {
-	Name               string
-	Slug               string
-	Description        string
-	Status             string
-	ResponsibleUserID  string
-	Client             *string
-	Tags               []string
-	Tech               []string
-	SectionTitle       string
-	SectionContent     string
+	Name                  string
+	Slug                  string
+	Description           string
+	Status                string
+	ResponsibleUserID     string
+	DevResponsibleUserIDs []string
+	Client                *string
+	Tags                  []string
+	Tech                  []string
+	SectionTitle          string
+	SectionContent        string
 }
 
 type PatchProjectInput struct {
-	Name              *string
-	Description       *string
-	Status            *string
-	ResponsibleUserID *string
-	Client            *string
-	HasClient         bool
-	Tags              []string
-	Tech              []string
-	HasTags           bool
-	HasTech           bool
+	Name                  *string
+	Description           *string
+	Status                *string
+	ResponsibleUserID     *string
+	DevResponsibleUserIDs []string
+	HasDevResponsibles    bool
+	Client                *string
+	HasClient             bool
+	Tags                  []string
+	Tech                  []string
+	HasTags               bool
+	HasTech               bool
 }
 
 func (s *ProjectService) accessibleIDs(ctx context.Context, user domain.User) ([]string, error) {
@@ -116,10 +119,20 @@ func (s *ProjectService) requireRead(ctx context.Context, user domain.User, proj
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar membros")
 	}
-	if !CanReadProject(user, *project, members) {
-		return nil, httperr.Forbidden("sem permissão para acessar este projeto")
+	if CanReadProject(user, *project, members) {
+		return members, nil
 	}
-	return members, nil
+	// Dev-responsáveis também têm acesso de leitura ao projeto (aba Desenvolvimento).
+	devIDs, err := s.db.ListDevResponsibleIDs(ctx, project.ID)
+	if err != nil {
+		return nil, httperr.Internal("falha ao carregar dev-responsáveis")
+	}
+	for _, id := range devIDs {
+		if id == user.ID {
+			return members, nil
+		}
+	}
+	return nil, httperr.Forbidden("sem permissão para acessar este projeto")
 }
 
 func (s *ProjectService) requireManage(ctx context.Context, user domain.User, project *domain.Project) error {
@@ -144,7 +157,31 @@ func (s *ProjectService) GetBySlug(ctx context.Context, user domain.User, slug s
 	return project, members, nil
 }
 
+func (s *ProjectService) ListStatuses(ctx context.Context) ([]domain.ProjectStatusMeta, error) {
+	statuses, err := s.db.ListStatuses(ctx)
+	if err != nil {
+		return nil, httperr.Internal("falha ao listar status")
+	}
+	return statuses, nil
+}
+
+func (s *ProjectService) resolveStatus(ctx context.Context, code string) (*domain.ProjectStatusMeta, error) {
+	meta, err := s.db.GetStatus(ctx, code)
+	if err != nil {
+		return nil, httperr.Internal("falha ao validar status")
+	}
+	if meta == nil {
+		return nil, httperr.InvalidStatus("status inválido")
+	}
+	return meta, nil
+}
+
 func (s *ProjectService) List(ctx context.Context, user domain.User, filter domain.ProjectListFilter) ([]domain.Project, error) {
+	if filter.Status != "" {
+		if _, err := s.resolveStatus(ctx, filter.Status); err != nil {
+			return nil, err
+		}
+	}
 	allowed, err := s.accessibleIDs(ctx, user)
 	if err != nil {
 		return nil, httperr.Internal("falha ao listar projetos")
@@ -170,6 +207,9 @@ func (s *ProjectService) Create(ctx context.Context, user domain.User, input Cre
 	status := domain.ProjectStatus(input.Status)
 	if status == "" {
 		status = domain.StatusActive
+	}
+	if _, err := s.resolveStatus(ctx, string(status)); err != nil {
+		return nil, err
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -204,6 +244,10 @@ func (s *ProjectService) Create(ctx context.Context, user domain.User, input Cre
 	}
 	if err := s.tags.SetProjectTags(ctx, tx, project.ID, techIDs, "project_tech"); err != nil {
 		return nil, httperr.Internal("falha ao salvar tecnologias")
+	}
+
+	if err := s.db.SetDevResponsibles(ctx, tx, project.ID, input.DevResponsibleUserIDs); err != nil {
+		return nil, httperr.Internal("falha ao salvar dev-responsáveis")
 	}
 
 	sectionTitle := input.SectionTitle
@@ -251,8 +295,18 @@ func (s *ProjectService) Patch(ctx context.Context, user domain.User, slug strin
 	if input.Description != nil {
 		fields["description"] = *input.Description
 	}
+	statusChanged := false
+	var newStatusLabel string
 	if input.Status != nil {
-		fields["status"] = *input.Status
+		meta, err := s.resolveStatus(ctx, *input.Status)
+		if err != nil {
+			return nil, err
+		}
+		fields["status"] = meta.Code
+		if domain.ProjectStatus(meta.Code) != project.Status {
+			statusChanged = true
+			newStatusLabel = meta.Label
+		}
 	}
 	if input.ResponsibleUserID != nil {
 		fields["responsible_user_id"] = *input.ResponsibleUserID
@@ -300,6 +354,11 @@ func (s *ProjectService) Patch(ctx context.Context, user domain.User, slug strin
 			return nil, httperr.Internal("falha ao atualizar tecnologias")
 		}
 	}
+	if input.HasDevResponsibles {
+		if err := s.db.SetDevResponsibles(ctx, tx, project.ID, input.DevResponsibleUserIDs); err != nil {
+			return nil, httperr.Internal("falha ao atualizar dev-responsáveis")
+		}
+	}
 
 	actorID := user.ID
 	if err := s.audit.Create(ctx, tx, &domain.AuditEvent{
@@ -308,6 +367,16 @@ func (s *ProjectService) Patch(ctx context.Context, user domain.User, slug strin
 		EntityType: strPtr("project"), EntityID: strPtr(project.ID),
 	}); err != nil {
 		return nil, httperr.Internal("falha ao registrar auditoria")
+	}
+
+	if statusChanged {
+		if err := s.audit.Create(ctx, tx, &domain.AuditEvent{
+			ProjectID: project.ID, ActorUserID: &actorID,
+			Action: "Alterou o status para", Target: newStatusLabel,
+			EntityType: strPtr("project"), EntityID: strPtr(project.ID),
+		}); err != nil {
+			return nil, httperr.Internal("falha ao registrar auditoria")
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -342,10 +411,22 @@ func (s *ProjectService) ListMembers(ctx context.Context, projectID string) ([]d
 	return s.db.ListMembers(ctx, projectID)
 }
 
+func (s *ProjectService) DevResponsibleIDs(ctx context.Context, projectID string) ([]string, error) {
+	return s.db.ListDevResponsibleIDs(ctx, projectID)
+}
+
+func (s *ProjectService) LoadDevSections(ctx context.Context, projectID string) ([]domain.Section, error) {
+	return s.sections.ListByProject(ctx, projectID, domain.SectionDev)
+}
+
+func (s *ProjectService) LoadDevAttachments(ctx context.Context, projectID string) ([]domain.Attachment, error) {
+	return s.attachments.ListByProject(ctx, projectID, domain.AttachmentDev)
+}
+
 func (s *ProjectService) LoadProjectData(ctx context.Context, projectID string) (
 	[]domain.Section, []domain.Lesson, []domain.Attachment, []domain.AuditEvent, error,
 ) {
-	sections, err := s.sections.ListByProject(ctx, projectID)
+	sections, err := s.sections.ListByProject(ctx, projectID, domain.SectionDoc)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -353,7 +434,7 @@ func (s *ProjectService) LoadProjectData(ctx context.Context, projectID string) 
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	attachments, err := s.attachments.ListByProject(ctx, projectID)
+	attachments, err := s.attachments.ListByProject(ctx, projectID, domain.AttachmentProject)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}

@@ -48,7 +48,7 @@ func setupTestEnv(t *testing.T) (*echo.Echo, *db.DB, func()) {
 	attachmentRepo := repository.NewAttachmentRepository(database)
 	auditRepo := repository.NewAuditRepository(database)
 	tagRepo := repository.NewTagRepository(database)
-	store, _ := storage.NewLocalFileStorage(cfg.StoragePath)
+	_, _ = storage.NewLocalFileStorage(cfg.StoragePath)
 
 	authSvc := service.NewAuthService(cfg, userRepo, refreshRepo)
 	projectSvc := service.NewProjectService(projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, auditRepo, userRepo, database.Pool)
@@ -75,7 +75,7 @@ func setupTestEnv(t *testing.T) (*echo.Echo, *db.DB, func()) {
 
 func seedTestData(t *testing.T, ctx context.Context, database *db.DB, users *repository.UserRepository, projects *repository.ProjectRepository, sections *repository.SectionRepository) {
 	t.Helper()
-	_, _ = database.Pool.Exec(ctx, `TRUNCATE users, projects, project_sections, project_members, project_lessons, project_attachments, files, tags, project_tags, project_tech, lesson_tags, audit_events, refresh_tokens CASCADE`)
+	_, _ = database.Pool.Exec(ctx, `TRUNCATE users, projects, project_sections, project_members, project_dev_responsibles, project_lessons, project_attachments, files, tags, project_tags, project_tech, lesson_tags, audit_events, refresh_tokens CASCADE`)
 
 	adminHash, _ := service.HashPassword("admin123")
 	userHash, _ := service.HashPassword("user123")
@@ -87,8 +87,8 @@ func seedTestData(t *testing.T, ctx context.Context, database *db.DB, users *rep
 	defer tx.Rollback(ctx)
 
 	admin := domain.User{Email: "admin@test.com", PasswordHash: adminHash, Name: "Admin", Role: domain.RoleAdmin, IsActive: true}
-	reader := domain.User{Email: "reader@test.com", PasswordHash: userHash, Name: "Leitor", Role: domain.RoleUser, IsActive: true}
-	responsible := domain.User{Email: "resp@test.com", PasswordHash: userHash, Name: "Responsavel", Role: domain.RoleUser, IsActive: true}
+	reader := domain.User{Email: "reader@test.com", PasswordHash: userHash, Name: "Leitor", Role: domain.RoleConsultor, IsActive: true}
+	responsible := domain.User{Email: "resp@test.com", PasswordHash: userHash, Name: "Responsavel", Role: domain.RoleConsultor, IsActive: true}
 	for _, u := range []*domain.User{&admin, &reader, &responsible} {
 		if err := users.Create(ctx, tx, u); err != nil {
 			t.Fatal(err)

@@ -47,11 +47,11 @@ func NewAttachmentRepository(database *db.DB) *AttachmentRepository {
 	return &AttachmentRepository{db: database}
 }
 
-func (r *AttachmentRepository) ListByProject(ctx context.Context, projectID string) ([]domain.Attachment, error) {
+func (r *AttachmentRepository) ListByProject(ctx context.Context, projectID string, kind domain.AttachmentKind) ([]domain.Attachment, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, project_id, file_id, display_name, created_at
-		FROM project_attachments WHERE project_id = $1 ORDER BY created_at DESC
-	`, projectID)
+		SELECT id, project_id, file_id, display_name, kind, created_at
+		FROM project_attachments WHERE project_id = $1 AND kind = $2 ORDER BY created_at DESC
+	`, projectID, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (r *AttachmentRepository) ListByProject(ctx context.Context, projectID stri
 	var items []domain.Attachment
 	for rows.Next() {
 		var a domain.Attachment
-		if err := rows.Scan(&a.ID, &a.ProjectID, &a.FileID, &a.DisplayName, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.ProjectID, &a.FileID, &a.DisplayName, &a.Kind, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, a)
@@ -71,9 +71,9 @@ func (r *AttachmentRepository) ListByProject(ctx context.Context, projectID stri
 func (r *AttachmentRepository) GetByID(ctx context.Context, projectID, attachmentID string) (*domain.Attachment, error) {
 	var a domain.Attachment
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT id, project_id, file_id, display_name, created_at
+		SELECT id, project_id, file_id, display_name, kind, created_at
 		FROM project_attachments WHERE id = $1 AND project_id = $2
-	`, attachmentID, projectID).Scan(&a.ID, &a.ProjectID, &a.FileID, &a.DisplayName, &a.CreatedAt)
+	`, attachmentID, projectID).Scan(&a.ID, &a.ProjectID, &a.FileID, &a.DisplayName, &a.Kind, &a.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -84,18 +84,23 @@ func (r *AttachmentRepository) GetByID(ctx context.Context, projectID, attachmen
 }
 
 func (r *AttachmentRepository) Create(ctx context.Context, tx pgx.Tx, a *domain.Attachment) error {
+	kind := a.Kind
+	if kind == "" {
+		kind = domain.AttachmentProject
+	}
+	a.Kind = kind
 	return tx.QueryRow(ctx, `
-		INSERT INTO project_attachments (project_id, file_id, display_name)
-		VALUES ($1, $2, $3) RETURNING id, created_at
-	`, a.ProjectID, a.FileID, a.DisplayName).Scan(&a.ID, &a.CreatedAt)
+		INSERT INTO project_attachments (project_id, file_id, display_name, kind)
+		VALUES ($1, $2, $3, $4) RETURNING id, created_at
+	`, a.ProjectID, a.FileID, a.DisplayName, kind).Scan(&a.ID, &a.CreatedAt)
 }
 
 func (r *AttachmentRepository) Delete(ctx context.Context, attachmentID string) (*domain.Attachment, error) {
 	var a domain.Attachment
 	err := r.db.Pool.QueryRow(ctx, `
 		DELETE FROM project_attachments WHERE id = $1
-		RETURNING id, project_id, file_id, display_name, created_at
-	`, attachmentID).Scan(&a.ID, &a.ProjectID, &a.FileID, &a.DisplayName, &a.CreatedAt)
+		RETURNING id, project_id, file_id, display_name, kind, created_at
+	`, attachmentID).Scan(&a.ID, &a.ProjectID, &a.FileID, &a.DisplayName, &a.Kind, &a.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
@@ -105,13 +110,14 @@ func (r *AttachmentRepository) Delete(ctx context.Context, attachmentID string) 
 	return &a, nil
 }
 
-func (r *AttachmentRepository) GetProjectByFileID(ctx context.Context, fileID string) (string, error) {
+func (r *AttachmentRepository) GetProjectAndKindByFileID(ctx context.Context, fileID string) (string, domain.AttachmentKind, error) {
 	var projectID string
+	var kind domain.AttachmentKind
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT project_id FROM project_attachments WHERE file_id = $1 LIMIT 1
-	`, fileID).Scan(&projectID)
+		SELECT project_id, kind FROM project_attachments WHERE file_id = $1 LIMIT 1
+	`, fileID).Scan(&projectID, &kind)
 	if err == pgx.ErrNoRows {
-		return "", nil
+		return "", "", nil
 	}
-	return projectID, err
+	return projectID, kind, err
 }

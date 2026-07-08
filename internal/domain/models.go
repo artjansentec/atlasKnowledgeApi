@@ -5,8 +5,9 @@ import "time"
 type UserRole string
 
 const (
-	RoleAdmin UserRole = "admin"
-	RoleUser  UserRole = "user"
+	RoleAdmin     UserRole = "admin"
+	RoleConsultor UserRole = "consultor"
+	RoleDeveloper UserRole = "desenvolvedor"
 )
 
 type User struct {
@@ -31,10 +32,21 @@ type RefreshToken struct {
 type ProjectStatus string
 
 const (
-	StatusActive ProjectStatus = "active"
-	StatusPaused ProjectStatus = "paused"
-	StatusDone   ProjectStatus = "done"
+	StatusActive    ProjectStatus = "active"
+	StatusPaused    ProjectStatus = "paused"
+	StatusDone      ProjectStatus = "done"
+	StatusCancelled ProjectStatus = "cancelled"
 )
+
+// ProjectStatusMeta descreve um status disponível na tabela project_statuses.
+// A tabela é a fonte de verdade: rótulo e cores (texto/fundo) alimentam o front.
+type ProjectStatusMeta struct {
+	Code       string
+	Label      string
+	Color      string
+	Background string
+	SortOrder  int
+}
 
 type Project struct {
 	ID                string
@@ -62,12 +74,20 @@ type ProjectMember struct {
 	Role      MemberRole
 }
 
+type SectionKind string
+
+const (
+	SectionDoc SectionKind = "doc"
+	SectionDev SectionKind = "dev"
+)
+
 type Section struct {
 	ID        string
 	ProjectID string
 	ParentID  *string
 	Title     string
 	Content   string
+	Kind      SectionKind
 	SortOrder int
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -77,10 +97,10 @@ type Section struct {
 type LessonType string
 
 const (
-	LessonProblem    LessonType = "problem"
-	LessonAttention  LessonType = "attention"
-	LessonFuture     LessonType = "future"
-	LessonSuccess    LessonType = "success"
+	LessonProblem   LessonType = "problem"
+	LessonAttention LessonType = "attention"
+	LessonFuture    LessonType = "future"
+	LessonSuccess   LessonType = "success"
 )
 
 type Lesson struct {
@@ -106,11 +126,19 @@ type FileRecord struct {
 	CreatedAt    time.Time
 }
 
+type AttachmentKind string
+
+const (
+	AttachmentProject AttachmentKind = "project"
+	AttachmentDev     AttachmentKind = "dev"
+)
+
 type Attachment struct {
 	ID          string
 	ProjectID   string
 	FileID      string
 	DisplayName *string
+	Kind        AttachmentKind
 	CreatedAt   time.Time
 }
 

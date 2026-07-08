@@ -40,6 +40,10 @@ func Validation(message string) *Error {
 	return New(http.StatusUnprocessableEntity, "VALIDATION_ERROR", message)
 }
 
+func InvalidStatus(message string) *Error {
+	return New(http.StatusBadRequest, "INVALID_STATUS", message)
+}
+
 func Internal(message string) *Error {
 	return New(http.StatusInternalServerError, "INTERNAL_ERROR", message)
 }

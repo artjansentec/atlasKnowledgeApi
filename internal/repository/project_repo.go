@@ -131,12 +131,47 @@ func (r *ProjectRepository) Update(ctx context.Context, tx pgx.Tx, p *domain.Pro
 		UPDATE projects SET
 			name = COALESCE(NULLIF($2, ''), name),
 			description = COALESCE(NULLIF($3, ''), description),
-			status = COALESCE(NULLIF($4::text, '')::project_status, status),
+			status = COALESCE(NULLIF($4, ''), status),
 			responsible_user_id = COALESCE(NULLIF($5::uuid, '00000000-0000-0000-0000-000000000000'::uuid), responsible_user_id),
 			client = $6
 		WHERE id = $1 AND deleted_at IS NULL
 	`, p.ID, p.Name, p.Description, string(p.Status), p.ResponsibleUserID, p.Client)
 	return err
+}
+
+func (r *ProjectRepository) ListStatuses(ctx context.Context) ([]domain.ProjectStatusMeta, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT code, label, color, background, sort_order
+		FROM project_statuses ORDER BY sort_order, code
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var statuses []domain.ProjectStatusMeta
+	for rows.Next() {
+		var s domain.ProjectStatusMeta
+		if err := rows.Scan(&s.Code, &s.Label, &s.Color, &s.Background, &s.SortOrder); err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, s)
+	}
+	return statuses, rows.Err()
+}
+
+func (r *ProjectRepository) GetStatus(ctx context.Context, code string) (*domain.ProjectStatusMeta, error) {
+	var s domain.ProjectStatusMeta
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT code, label, color, background, sort_order
+		FROM project_statuses WHERE code = $1
+	`, code).Scan(&s.Code, &s.Label, &s.Color, &s.Background, &s.SortOrder)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 func (r *ProjectRepository) Patch(ctx context.Context, id string, fields map[string]interface{}) error {
@@ -251,13 +286,52 @@ func (r *ProjectRepository) ReplaceReaders(ctx context.Context, projectID string
 	return tx.Commit(ctx)
 }
 
+func (r *ProjectRepository) ListDevResponsibleIDs(ctx context.Context, projectID string) ([]string, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT user_id FROM project_dev_responsibles WHERE project_id = $1
+	`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (r *ProjectRepository) SetDevResponsibles(ctx context.Context, tx pgx.Tx, projectID string, userIDs []string) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM project_dev_responsibles WHERE project_id = $1`, projectID); err != nil {
+		return err
+	}
+	for _, uid := range userIDs {
+		if uid == "" {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO project_dev_responsibles (project_id, user_id) VALUES ($1, $2)
+			ON CONFLICT DO NOTHING
+		`, projectID, uid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *ProjectRepository) AccessibleProjectIDs(ctx context.Context, userID string, isAdmin bool) ([]string, error) {
 	if isAdmin {
 		return nil, nil // nil means all
 	}
 	rows, err := r.db.Pool.Query(ctx, `
 		SELECT id FROM projects WHERE deleted_at IS NULL AND (
-			responsible_user_id = $1 OR id IN (SELECT project_id FROM project_members WHERE user_id = $1)
+			responsible_user_id = $1
+			OR id IN (SELECT project_id FROM project_members WHERE user_id = $1)
+			OR id IN (SELECT project_id FROM project_dev_responsibles WHERE user_id = $1)
 		)
 	`, userID)
 	if err != nil {
