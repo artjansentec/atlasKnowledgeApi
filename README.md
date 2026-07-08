@@ -29,7 +29,9 @@
 
 ## Sobre
 
-Backend da plataforma de conhecimento interno. Oferece autenticação JWT, CRUD de projetos com permissões, upload de arquivos e documentação interativa via Swagger UI.
+Backend da plataforma de conhecimento interno. Oferece autenticação JWT, CRUD de projetos com permissões por perfil, seções em árvore (abas **Projeto** e **Desenvolvimento**), lições aprendidas, upload de arquivos e documentação interativa via Swagger UI.
+
+**Perfis de acesso:** `admin`, `consultor` e `desenvolvedor`. A aba **Desenvolvimento** (seções e anexos técnicos) só é visível para `admin` e `desenvolvedor`; a edição fica restrita a `admin` e aos dev-responsáveis do projeto.
 
 <table>
 <tr>
@@ -141,6 +143,7 @@ make run
 | `STORAGE_PATH` | Pasta de uploads locais | `./storage` |
 | `MAX_UPLOAD_BYTES` | Tamanho máximo upload | `20971520` (20 MB) |
 | `CORS_ORIGINS` | Origens permitidas (vírgula) | `http://localhost:5173` |
+| `API_BASE_URL` | URL base usada em links de download de anexos | `http://localhost:{PORT}` |
 
 **Datas JSON:** campos de data usam formato `YYYY-MM-DD` (ISO 8601, apenas data).
 
@@ -174,6 +177,7 @@ A especificação OpenAPI também está em `GET /openapi.yaml`.
 | `GET` | `/users` | JWT |
 | `GET` | `/dashboard/summary` | JWT |
 | `GET` | `/search?q=` | JWT |
+| `GET` | `/project-statuses` | JWT |
 | `GET` | `/projects` | JWT |
 | `GET` | `/projects/:slug` | JWT |
 | `POST` | `/projects` | JWT (admin) |
@@ -182,8 +186,11 @@ A especificação OpenAPI também está em `GET /openapi.yaml`.
 | `PUT` | `/projects/:slug/readers` | JWT |
 | `POST` / `PATCH` / `DELETE` | `/projects/:slug/sections...` | JWT |
 | `PUT` | `/projects/:slug/sections/reorder` | JWT |
+| `POST` / `PATCH` / `DELETE` | `/projects/:slug/dev-sections...` | JWT (admin / dev) |
+| `PUT` | `/projects/:slug/dev-sections/reorder` | JWT (admin / dev) |
 | `POST` / `PATCH` / `DELETE` | `/projects/:slug/lessons...` | JWT |
 | `POST` / `DELETE` | `/projects/:slug/attachments...` | JWT |
+| `POST` / `DELETE` | `/projects/:slug/dev-attachments...` | JWT (admin / dev) |
 | `GET` | `/files/:fileId/download` | JWT |
 
 ---
@@ -224,6 +231,59 @@ Depois rode:
 go run ./cmd/migrate up
 go run ./cmd/create-admin -email seu@email.com -password SUA_SENHA
 ```
+
+---
+
+## Etapa atual
+
+> **Em andamento:** backend da tela de projeto com aba de **Desenvolvimento** e status configuráveis.
+
+A etapa atual entrega o suporte de back-end para a nova tela de projeto do front, separando o conteúdo em duas abas (**Projeto** e **Desenvolvimento**) com permissões por perfil, além de tornar os status de projeto configuráveis via banco.
+
+### O que foi feito até agora
+
+**Perfis e permissões**
+
+- Perfis migrados de `admin`/`user` para **`admin`**, **`consultor`** e **`desenvolvedor`** (migration `000002`).
+- Aba **Desenvolvimento** visível apenas para `admin` e `desenvolvedor`; `consultor` recebe listas vazias.
+- Edição da aba Desenvolvimento restrita a `admin` e aos **dev-responsáveis** do projeto (tabela `project_dev_responsibles`).
+
+**Seções e anexos por aba**
+
+- `section_kind` (`doc` / `dev`) separa seções de documentação (aba Projeto) das de requisitos técnicos (aba Desenvolvimento).
+- `attachment_kind` (`project` / `dev`) separa os anexos de cada aba.
+- Rotas espelhadas: `dev-sections...` e `dev-attachments...` (incluindo `reorder`).
+
+**Status de projeto configuráveis**
+
+- Nova tabela **`project_statuses`** como fonte de verdade (migrations `000004` e `000005`): cada status carrega `label`, `color` e `background` para o front renderizar os badges.
+- Status disponíveis: `active` (Ativo), `paused` (Pausado), `done` (Concluído) e `cancelled` (Cancelado).
+- Adicionar um novo status vira um simples `INSERT`, sem migration de `enum`.
+- Nova rota `GET /project-statuses` alimenta o select e os badges do front.
+
+**Projetos**
+
+- Criação/edição aceita `devResponsibleUserIds`, `client`, `tags` e `tech`.
+- Detalhe do projeto entrega dados das duas abas conforme o perfil do usuário.
+
+**Busca e dashboard**
+
+- Filtro por período (`DateRange`) na busca e no dashboard.
+- Links de download de anexos usam `API_BASE_URL`.
+
+### Migrations desta etapa
+
+| # | Migration | Conteúdo |
+|---|-----------|----------|
+| `000002` | `roles_and_dev` | Perfis, `section_kind`, dev-responsáveis |
+| `000003` | `dev_attachments` | `attachment_kind` para anexos por aba |
+| `000004` | `project_status_cancelled` | Status `cancelled` |
+| `000005` | `project_statuses_table` | Tabela `project_statuses` como fonte de verdade |
+
+### Próximos passos
+
+- Integração da tela de projeto (aba Desenvolvimento) com o front.
+- Ajustes finos de permissão/UX conforme feedback da tela.
 
 ---
 
