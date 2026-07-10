@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/atlas/knowledge-api/internal/bootstrap"
 	"github.com/atlas/knowledge-api/internal/config"
 	"github.com/atlas/knowledge-api/internal/db"
 	"github.com/atlas/knowledge-api/internal/handler"
@@ -57,6 +58,18 @@ func main() {
 		log.Fatalf("❌ banco de dados: %v\n   Verifique DATABASE_URL e se o Postgres local está rodando", err)
 	}
 	defer database.Close()
+
+	adminResult, err := bootstrap.EnsureDefaultAdmin(ctx, database, bootstrap.EnsureAdminOptions{
+		Email:    cfg.AdminEmail,
+		Password: cfg.AdminPassword,
+		Name:     cfg.AdminName,
+	})
+	if err != nil {
+		log.Fatalf("❌ admin inicial: %v", err)
+	}
+	if adminResult.Created {
+		fmt.Printf("admin criado: %s (%s)\n", adminResult.Name, adminResult.Email)
+	}
 
 	fileStore, err := storage.NewLocalFileStorage(cfg.StoragePath)
 	if err != nil {

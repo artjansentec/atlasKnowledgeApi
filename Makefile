@@ -4,7 +4,7 @@ MIGRATE ?= migrate
 DB_URL ?= $(shell grep DATABASE_URL .env 2>/dev/null | cut -d= -f2-)
 MIGRATIONS_PATH ?= internal/db/migrations
 
-# Linux/macOS — make run aplica migrations pendentes e sobe a API
+# Linux/macOS — make run aplica migrations, garante admin inicial e sobe a API
 # Windows: .\dev.ps1  (ou .\dev.ps1 -ApiOnly para pular migrations)
 
 run:

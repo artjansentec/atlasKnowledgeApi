@@ -13,6 +13,9 @@ import (
 type Config struct {
 	Port            string
 	DatabaseURL     string
+	AdminEmail      string
+	AdminPassword   string
+	AdminName       string
 	JWTSecret       string
 	JWTAccessTTL    time.Duration
 	JWTRefreshTTL   time.Duration
@@ -54,6 +57,9 @@ func Load() (*Config, error) {
 	return &Config{
 		Port:           port,
 		DatabaseURL:    getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/atlas_knowledge?sslmode=disable"),
+		AdminEmail:     getEnv("ADMIN_EMAIL", "root@gmail.com"),
+		AdminPassword:  getEnv("ADMIN_PASSWORD", "12345"),
+		AdminName:      getEnv("ADMIN_NAME", "Administrador"),
 		JWTSecret:      getEnv("JWT_SECRET", "change-me-in-production"),
 		JWTAccessTTL:   accessTTL,
 		JWTRefreshTTL:  refreshTTL,
