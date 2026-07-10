@@ -48,6 +48,10 @@ func main() {
 	}
 
 	ctx := context.Background()
+	if err := db.MigrateUp(cfg.DatabaseURL); err != nil {
+		log.Fatalf("❌ migrations: %v", err)
+	}
+
 	database, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("❌ banco de dados: %v\n   Verifique DATABASE_URL e se o Postgres local está rodando", err)

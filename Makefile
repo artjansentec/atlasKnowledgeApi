@@ -8,7 +8,6 @@ MIGRATIONS_PATH ?= internal/db/migrations
 # Windows: .\dev.ps1  (ou .\dev.ps1 -ApiOnly para pular migrations)
 
 run:
-	@go run ./cmd/migrate up || (go run ./cmd/migrate repair && go run ./cmd/migrate up)
 	go run ./cmd/api
 
 run-api:
