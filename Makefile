@@ -1,13 +1,17 @@
-.PHONY: run migrate-up migrate-down create-admin test lint
+.PHONY: run run-api migrate-up migrate-down create-admin test lint
 
 MIGRATE ?= migrate
 DB_URL ?= $(shell grep DATABASE_URL .env 2>/dev/null | cut -d= -f2-)
 MIGRATIONS_PATH ?= internal/db/migrations
 
-# Linux/macOS — no Windows use: go run ./cmd/migrate up | go run ./cmd/api
-# Ou: .\dev.ps1
+# Linux/macOS — make run aplica migrations pendentes e sobe a API
+# Windows: .\dev.ps1  (ou .\dev.ps1 -ApiOnly para pular migrations)
 
 run:
+	@go run ./cmd/migrate up || (go run ./cmd/migrate repair && go run ./cmd/migrate up)
+	go run ./cmd/api
+
+run-api:
 	go run ./cmd/api
 
 migrate-up:
