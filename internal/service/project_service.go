@@ -47,6 +47,25 @@ func Slugify(name string) string {
 	return strings.Trim(s, "-")
 }
 
+func (s *ProjectService) ensureUniqueSlug(ctx context.Context, base string) (string, error) {
+	base = Slugify(base)
+	if base == "" {
+		base = "projeto"
+	}
+	candidate := base
+	for i := 2; i < 1000; i++ {
+		exists, err := s.db.SlugExists(ctx, candidate)
+		if err != nil {
+			return "", httperr.Internal("falha ao validar slug")
+		}
+		if !exists {
+			return candidate, nil
+		}
+		candidate = fmt.Sprintf("%s-%d", base, i)
+	}
+	return "", httperr.Validation("não foi possível gerar um slug único")
+}
+
 type ProjectService struct {
 	db          *repository.ProjectRepository
 	sections    *repository.SectionRepository
@@ -200,10 +219,29 @@ func (s *ProjectService) Create(ctx context.Context, user domain.User, input Cre
 	if strings.TrimSpace(input.Name) == "" {
 		return nil, httperr.Validation("nome é obrigatório")
 	}
-	slug := input.Slug
-	if slug == "" {
-		slug = Slugify(input.Name)
+
+	explicitSlug := strings.TrimSpace(input.Slug) != ""
+	var slug string
+	var err error
+	if explicitSlug {
+		slug = Slugify(input.Slug)
+		if slug == "" {
+			return nil, httperr.Validation("slug inválido")
+		}
+		exists, checkErr := s.db.SlugExists(ctx, slug)
+		if checkErr != nil {
+			return nil, httperr.Internal("falha ao validar slug")
+		}
+		if exists {
+			return nil, httperr.Validation("slug já está em uso")
+		}
+	} else {
+		slug, err = s.ensureUniqueSlug(ctx, input.Name)
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	status := domain.ProjectStatus(input.Status)
 	if status == "" {
 		status = domain.StatusActive
@@ -227,7 +265,10 @@ func (s *ProjectService) Create(ctx context.Context, user domain.User, input Cre
 		Client:            input.Client,
 	}
 	if err := s.db.Create(ctx, tx, project); err != nil {
-		return nil, httperr.Validation("não foi possível criar o projeto (slug pode estar em uso)")
+		if explicitSlug {
+			return nil, httperr.Validation("slug já está em uso")
+		}
+		return nil, httperr.Validation("não foi possível criar o projeto")
 	}
 
 	tagIDs, err := s.tags.ResolveNames(ctx, tx, input.Tags, domain.TagGeneral)

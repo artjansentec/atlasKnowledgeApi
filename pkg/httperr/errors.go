@@ -48,6 +48,26 @@ func Internal(message string) *Error {
 	return New(http.StatusInternalServerError, "INTERNAL_ERROR", message)
 }
 
+func Conflict(message string) *Error {
+	return New(http.StatusConflict, "CONFLICT", message)
+}
+
+func PayloadTooLarge(message string) *Error {
+	return New(http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", message)
+}
+
+func UnsupportedMediaType(message string) *Error {
+	return New(http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", message)
+}
+
+func BadGateway(message string) *Error {
+	return New(http.StatusBadGateway, "BAD_GATEWAY", message)
+}
+
+func GatewayTimeout(message string) *Error {
+	return New(http.StatusGatewayTimeout, "GATEWAY_TIMEOUT", message)
+}
+
 func AsHTTPError(err error) *Error {
 	var httpErr *Error
 	if errors.As(err, &httpErr) {

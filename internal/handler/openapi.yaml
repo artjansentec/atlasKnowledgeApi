@@ -21,6 +21,7 @@ tags:
   - name: sections
   - name: lessons
   - name: attachments
+  - name: mnemos
 
 paths:
   /api/v1/health:
@@ -468,12 +469,133 @@ paths:
         '200':
           description: Stream do arquivo
 
+  /api/v1/mnemos/projects:
+    post:
+      tags: [mnemos]
+      summary: Criar ou atualizar projeto (payload Atlas do Mnemos)
+      description: |
+        Aceita `project` + `sections[]` no formato DocumentResult do Mnemos.
+        Se o slug já existir, atualiza metadados e (por padrão) substitui as seções.
+        Auth: Bearer JWT (admin) ou header `X-Api-Key` (`MNEMOS_API_KEY`).
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MnemosSyncRequest'
+      responses:
+        '201':
+          description: Projeto criado
+        '200':
+          description: Projeto atualizado
+
+  /api/v1/mnemos/projects/{slug}:
+    patch:
+      tags: [mnemos]
+      summary: Atualizar metadados do projeto
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, paused, done, cancelled]
+                client:
+                  type: string
+                responsibleUserId:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Projeto atualizado
+
+  /api/v1/mnemos/projects/{slug}/structure:
+    put:
+      tags: [mnemos]
+      summary: Aplicar árvore de seções (formato Mnemos)
+      description: |
+        Substitui (padrão) ou acrescenta seções com `temp_id` / `parent_temp_id`,
+        `kind` doc|dev e `content` em Markdown.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sections]
+              properties:
+                replaceSections:
+                  type: boolean
+                  default: true
+                sections:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MnemosSection'
+      responses:
+        '200':
+          description: Estrutura aplicada
+
+  /api/v1/mnemos/projects/{slug}/attachments:
+    post:
+      tags: [mnemos]
+      summary: Anexar arquivos ao projeto
+      description: |
+        Multipart com `files` (ou `file`). Campo opcional `meta` (JSON) com
+        `attachments[]` do Mnemos (`source_filename`, `display_name`, `kind`).
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                meta:
+                  type: string
+                  description: JSON array ou {"attachments":[...]}
+      responses:
+        '201':
+          description: Anexos criados
+
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Api-Key
+      description: Valor de MNEMOS_API_KEY
 
   parameters:
     Slug:
@@ -551,3 +673,56 @@ components:
           type: array
           items:
             type: string
+
+    MnemosSyncRequest:
+      type: object
+      required: [project]
+      properties:
+        project:
+          $ref: '#/components/schemas/MnemosProject'
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/MnemosSection'
+        replaceSections:
+          type: boolean
+          default: true
+        responsibleUserId:
+          type: string
+          format: uuid
+
+    MnemosProject:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, paused, done, cancelled]
+        client:
+          type: string
+
+    MnemosSection:
+      type: object
+      required: [temp_id, title]
+      properties:
+        temp_id:
+          type: string
+        parent_temp_id:
+          type: string
+          description: Vazio = raiz
+        title:
+          type: string
+        content:
+          type: string
+          description: Markdown
+        kind:
+          type: string
+          enum: [doc, dev]
+        sort_order:
+          type: integer

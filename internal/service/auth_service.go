@@ -102,6 +102,17 @@ func (s *AuthService) Me(ctx context.Context, userID string) (*domain.User, erro
 	return user, nil
 }
 
+func (s *AuthService) MeByEmail(ctx context.Context, email string) (*domain.User, error) {
+	user, err := s.users.GetByEmail(ctx, email)
+	if err != nil {
+		return nil, httperr.Internal("falha ao buscar usuário")
+	}
+	if user == nil || !user.IsActive {
+		return nil, nil
+	}
+	return user, nil
+}
+
 func (s *AuthService) issueTokens(ctx context.Context, user domain.User) (*AuthResult, error) {
 	access, err := s.signAccess(user)
 	if err != nil {

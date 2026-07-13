@@ -189,3 +189,78 @@ type SectionReorderItem struct {
 	ParentID  *string
 	SortOrder int
 }
+
+type DocumentationJobStatus string
+
+const (
+	DocJobPending         DocumentationJobStatus = "PENDING"
+	DocJobValidating      DocumentationJobStatus = "VALIDATING"
+	DocJobUploadingFiles  DocumentationJobStatus = "UPLOADING_FILES"
+	DocJobWaitingAI       DocumentationJobStatus = "WAITING_AI"
+	DocJobProcessing      DocumentationJobStatus = "PROCESSING"
+	DocJobCompleted       DocumentationJobStatus = "COMPLETED"
+	DocJobFailed          DocumentationJobStatus = "FAILED"
+	DocJobCancelled       DocumentationJobStatus = "CANCELLED"
+)
+
+func (s DocumentationJobStatus) IsTerminal() bool {
+	return s == DocJobCompleted || s == DocJobFailed || s == DocJobCancelled
+}
+
+func (s DocumentationJobStatus) IsActive() bool {
+	switch s {
+	case DocJobPending, DocJobValidating, DocJobUploadingFiles, DocJobWaitingAI, DocJobProcessing:
+		return true
+	default:
+		return false
+	}
+}
+
+// DocumentationJob representa uma solicitação de geração de documentação.
+type DocumentationJob struct {
+	ID                 string
+	ProjectID          string
+	CreatedBy          string
+	Status             DocumentationJobStatus
+	Progress           int
+	CurrentStep        string
+	ProjectName        string
+	Description        string
+	GenerationOptions  []byte
+	ErrorMessage       *string
+	VersionID          *string
+	FileCount          int
+	TotalSizeBytes     int64
+	StartedAt          *time.Time
+	FinishedAt         *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+// DocumentationVersion é uma geração persistida (conteúdo integral da IA).
+type DocumentationVersion struct {
+	ID                string
+	ProjectID         string
+	JobID             string
+	CreatedBy         string
+	VersionNumber     int
+	Content           []byte
+	ModelUsed         string
+	Language          string
+	ProcessingMs      int64
+	FileCount         int
+	TotalSizeBytes    int64
+	GenerationOptions []byte
+	CreatedAt         time.Time
+	DeletedAt         *time.Time
+}
+
+// DocumentationFile liga um arquivo de entrada a um job/versão.
+type DocumentationFile struct {
+	ID          string
+	JobID       string
+	VersionID   *string
+	FileID      string
+	ContentHash *string
+	CreatedAt   time.Time
+}

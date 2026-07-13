@@ -33,6 +33,18 @@ func (r *ProjectRepository) GetBySlug(ctx context.Context, slug string) (*domain
 	return &p, nil
 }
 
+// SlugExists reports whether any project row (including soft-deleted) owns the slug.
+func (r *ProjectRepository) SlugExists(ctx context.Context, slug string) (bool, error) {
+	var exists bool
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM projects WHERE slug = $1)
+	`, slug).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("slug exists: %w", err)
+	}
+	return exists, nil
+}
+
 func (r *ProjectRepository) GetByID(ctx context.Context, id string) (*domain.Project, error) {
 	var p domain.Project
 	err := r.db.Pool.QueryRow(ctx, `

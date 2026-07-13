@@ -89,6 +89,17 @@ func (r *SectionRepository) SoftDelete(ctx context.Context, sectionID string) er
 	return err
 }
 
+// SoftDeleteByProject marca todas as seções ativas do projeto como removidas.
+func (r *SectionRepository) SoftDeleteByProject(ctx context.Context, tx pgx.Tx, projectID string) error {
+	query := `UPDATE project_sections SET deleted_at = NOW() WHERE project_id = $1 AND deleted_at IS NULL`
+	if tx != nil {
+		_, err := tx.Exec(ctx, query, projectID)
+		return err
+	}
+	_, err := r.db.Pool.Exec(ctx, query, projectID)
+	return err
+}
+
 func (r *SectionRepository) Reorder(ctx context.Context, projectID string, kind domain.SectionKind, items []domain.SectionReorderItem) error {
 	tx, err := r.db.Pool.Begin(ctx)
 	if err != nil {

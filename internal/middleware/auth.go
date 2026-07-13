@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,13 +14,15 @@ import (
 )
 
 const UserContextKey = "user"
+const MnemosServiceAuthKey = "mnemos_service_auth"
 
 type AuthMiddleware struct {
 	auth *service.AuthService
+	cfg  *config.Config
 }
 
-func NewAuthMiddleware(auth *service.AuthService) *AuthMiddleware {
-	return &AuthMiddleware{auth: auth}
+func NewAuthMiddleware(auth *service.AuthService, cfg *config.Config) *AuthMiddleware {
+	return &AuthMiddleware{auth: auth, cfg: cfg}
 }
 
 func (m *AuthMiddleware) RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
@@ -54,6 +57,85 @@ func GetUser(c echo.Context) domain.User {
 	return c.Get(UserContextKey).(domain.User)
 }
 
+// TryGetUser devolve o usuário do contexto, se houver.
+func TryGetUser(c echo.Context) (domain.User, bool) {
+	v := c.Get(UserContextKey)
+	if v == nil {
+		return domain.User{}, false
+	}
+	u, ok := v.(domain.User)
+	return u, ok
+}
+
+// IsMnemosServiceAuth indica autenticação via X-Api-Key (integração Mnemos).
+func IsMnemosServiceAuth(c echo.Context) bool {
+	v, _ := c.Get(MnemosServiceAuthKey).(bool)
+	return v
+}
+
+// RequireMnemosAuth aceita JWT de admin ou MNEMOS_API_KEY.
+// Com chave de API a integração é autenticada; o usuário ator vem de
+// X-Actor-User-Id (opcional no middleware) ou responsibleUserId no body/form.
+func (m *AuthMiddleware) RequireMnemosAuth(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		unauthorized := func(msg string) error {
+			return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+				"success": false,
+				"error":   map[string]string{"code": "UNAUTHORIZED", "message": msg},
+			})
+		}
+
+		if key := extractMnemosAPIKey(c); key != "" {
+			if m.cfg.MnemosAPIKey == "" || key != m.cfg.MnemosAPIKey {
+				return unauthorized("chave de API inválida")
+			}
+			c.Set(MnemosServiceAuthKey, true)
+
+			if actorID := strings.TrimSpace(c.Request().Header.Get("X-Actor-User-Id")); actorID != "" {
+				user, err := m.auth.Me(c.Request().Context(), actorID)
+				if err != nil || user == nil {
+					return unauthorized("X-Actor-User-Id inválido")
+				}
+				c.Set(UserContextKey, *user)
+			}
+			return next(c)
+		}
+
+		header := c.Request().Header.Get(echo.HeaderAuthorization)
+		if len(header) < 8 || header[:7] != "Bearer " {
+			return unauthorized("token ou X-Api-Key ausente")
+		}
+		claims, err := m.auth.ParseAccessToken(header[7:])
+		if err != nil {
+			return unauthorized("token inválido")
+		}
+		user, err := m.auth.Me(c.Request().Context(), claims.UserID)
+		if err != nil {
+			return unauthorized("usuário inválido")
+		}
+		if user.Role != domain.RoleAdmin {
+			return c.JSON(http.StatusForbidden, map[string]interface{}{
+				"success": false,
+				"error":   map[string]string{"code": "FORBIDDEN", "message": "apenas admin ou chave Mnemos"},
+			})
+		}
+		c.Set(UserContextKey, *user)
+		return next(c)
+	}
+}
+
+func extractMnemosAPIKey(c echo.Context) string {
+	if key := strings.TrimSpace(c.Request().Header.Get("X-Api-Key")); key != "" {
+		return key
+	}
+	header := c.Request().Header.Get(echo.HeaderAuthorization)
+	const prefix = "ApiKey "
+	if len(header) > len(prefix) && strings.EqualFold(header[:len(prefix)], prefix) {
+		return strings.TrimSpace(header[len(prefix):])
+	}
+	return ""
+}
+
 func CORS(cfg *config.Config) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
@@ -65,7 +147,7 @@ func CORS(cfg *config.Config) echo.MiddlewareFunc {
 				}
 			}
 			c.Response().Header().Set(echo.HeaderAccessControlAllowCredentials, "true")
-			c.Response().Header().Set(echo.HeaderAccessControlAllowHeaders, "Content-Type, Authorization")
+			c.Response().Header().Set(echo.HeaderAccessControlAllowHeaders, "Content-Type, Authorization, X-Api-Key, X-Actor-User-Id")
 			c.Response().Header().Set(echo.HeaderAccessControlAllowMethods, "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			if c.Request().Method == http.MethodOptions {
 				return c.NoContent(http.StatusNoContent)

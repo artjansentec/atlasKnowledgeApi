@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/atlas/knowledge-api/internal/ai"
 	"github.com/atlas/knowledge-api/internal/bootstrap"
 	"github.com/atlas/knowledge-api/internal/config"
 	"github.com/atlas/knowledge-api/internal/db"
@@ -25,6 +26,11 @@ import (
 
 func printStartupBanner(cfg *config.Config) {
 	base := fmt.Sprintf("http://localhost:%s", cfg.Port)
+	aiBase := strings.TrimRight(cfg.AIServiceURL, "/")
+	aiGenerateURL := aiBase + "/v1/knowledge/document"
+	aiJobsURL := aiBase + "/v1/jobs/:id"
+	aiStatus, aiHealthURL := probeMnimosHealth(aiBase)
+
 	lines := []string{
 		"",
 		"  Atlas Knowledge API",
@@ -35,11 +41,37 @@ func printStartupBanner(cfg *config.Config) {
 		fmt.Sprintf("  Swagger     %s/swagger", base),
 		fmt.Sprintf("  Health      %s/api/v1/health", base),
 		fmt.Sprintf("  Storage     %s", cfg.StoragePath),
+		fmt.Sprintf("  Mnimos AI   %s", aiGenerateURL),
+		fmt.Sprintf("  Mnimos Jobs %s", aiJobsURL),
+		fmt.Sprintf("  Mnimos      %s  (%s)", aiStatus, aiHealthURL),
 		"  ─────────────────────────────────────────",
 		"  Parar       Ctrl+C",
 		"",
 	}
 	fmt.Println(strings.Join(lines, "\n"))
+}
+
+// probeMnimosHealth verifica /health e /v1/health no host de AI_SERVICE_URL.
+func probeMnimosHealth(aiBase string) (status, checkedURL string) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	candidates := []string{
+		aiBase + "/health",
+		aiBase + "/v1/health",
+	}
+
+	var lastURL string
+	for _, url := range candidates {
+		lastURL = url
+		resp, err := client.Get(url)
+		if err != nil {
+			continue
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return "online", url
+		}
+	}
+	return "offline", lastURL
 }
 
 func main() {
@@ -85,6 +117,9 @@ func main() {
 	attachmentRepo := repository.NewAttachmentRepository(database)
 	auditRepo := repository.NewAuditRepository(database)
 	tagRepo := repository.NewTagRepository(database)
+	documentationRepo := repository.NewDocumentationRepository(database)
+
+	aiClient := ai.NewClient(cfg.AIServiceURL, cfg.AIServiceTimeout)
 
 	authSvc := service.NewAuthService(cfg, userRepo, refreshRepo)
 	projectSvc := service.NewProjectService(projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, auditRepo, userRepo, database.Pool)
@@ -94,8 +129,11 @@ func main() {
 	searchSvc := service.NewSearchService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo)
 	dashboardSvc := service.NewDashboardService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo, tagRepo)
 	userSvc := service.NewUserListService(userRepo)
+	documentationSvc := service.NewDocumentationService(
+		cfg, projectRepo, documentationRepo, fileRepo, userRepo, auditRepo, fileStore, aiClient, database.Pool,
+	)
 
-	authMW := middleware.NewAuthMiddleware(authSvc)
+	authMW := middleware.NewAuthMiddleware(authSvc, cfg)
 	loginLimiter := middleware.NewRateLimiter(10)
 	searchLimiter := middleware.NewRateLimiter(10)
 
@@ -109,6 +147,11 @@ func main() {
 	searchHandler := handler.NewSearchHandler(searchSvc)
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	userHandler := handler.NewUserHandler(userSvc)
+	documentationHandler := handler.NewDocumentationHandler(documentationSvc)
+	mnemosSvc := service.NewMnemosService(
+		cfg, projectRepo, sectionRepo, attachmentRepo, fileRepo, userRepo, auditRepo, fileStore, database.Pool,
+	)
+	mnemosHandler := handler.NewMnemosHandler(mnemosSvc)
 
 	e := echo.New()
 	e.HideBanner = true
@@ -117,6 +160,7 @@ func main() {
 	e.Use(echomw.RequestID())
 	e.Use(echomw.Logger())
 	e.Use(middleware.CORS(cfg))
+	e.Use(echomw.BodyLimit(fmt.Sprintf("%dB", cfg.DocMaxTotalBytes+1024*1024)))
 
 	handler.RegisterSwagger(e)
 
@@ -164,6 +208,23 @@ func main() {
 	protected.DELETE("/projects/:slug/dev-attachments/:attachmentId", devAttachmentHandler.Delete)
 
 	protected.GET("/files/:fileId/download", attachmentHandler.Download)
+
+	protected.POST("/projects/:slug/documentation/generate", documentationHandler.Generate)
+	protected.GET("/projects/:slug/documentation", documentationHandler.GetLatest)
+	protected.GET("/projects/:slug/documentation/versions", documentationHandler.ListVersions)
+	protected.GET("/projects/:slug/documentation/:versionId", documentationHandler.GetVersion)
+	protected.DELETE("/projects/:slug/documentation/:versionId", documentationHandler.DeleteVersion)
+	protected.POST("/projects/:slug/documentation/:versionId/regenerate", documentationHandler.Regenerate)
+	protected.GET("/documentation/jobs", documentationHandler.ListJobs)
+	protected.GET("/documentation/jobs/:jobId", documentationHandler.GetJob)
+	protected.POST("/documentation/jobs/:jobId/cancel", documentationHandler.CancelJob)
+
+	// Integração Mnemos: admin JWT ou X-Api-Key (MNEMOS_API_KEY)
+	mnemosAPI := api.Group("/mnemos", authMW.RequireMnemosAuth)
+	mnemosAPI.POST("/projects", mnemosHandler.Sync)
+	mnemosAPI.PATCH("/projects/:slug", mnemosHandler.Patch)
+	mnemosAPI.PUT("/projects/:slug/structure", mnemosHandler.ApplyStructure)
+	mnemosAPI.POST("/projects/:slug/attachments", mnemosHandler.UploadAttachments)
 
 	go func() {
 		printStartupBanner(cfg)

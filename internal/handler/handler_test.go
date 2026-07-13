@@ -53,7 +53,7 @@ func setupTestEnv(t *testing.T) (*echo.Echo, *db.DB, func()) {
 	authSvc := service.NewAuthService(cfg, userRepo, refreshRepo)
 	projectSvc := service.NewProjectService(projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, auditRepo, userRepo, database.Pool)
 	sectionSvc := service.NewSectionService(projectRepo, sectionRepo, auditRepo)
-	authMW := middleware.NewAuthMiddleware(authSvc)
+	authMW := middleware.NewAuthMiddleware(authSvc, cfg)
 
 	authHandler := handler.NewAuthHandler(cfg, authSvc)
 	projectHandler := handler.NewProjectHandler(cfg, projectSvc, userRepo, tagRepo, fileRepo)
