@@ -77,6 +77,7 @@ type DocumentationService struct {
 	storage  storage.FileStorage
 	ai       *ai.Client
 	pool     pgxPool
+	sync     MnemosProjectSyncer
 }
 
 func NewDocumentationService(
@@ -96,6 +97,10 @@ func NewDocumentationService(
 	}
 }
 
+func (s *DocumentationService) SetMnemosSync(h MnemosProjectSyncer) {
+	s.sync = h
+}
+
 type GenerateInput struct {
 	ProjectName       string
 	Description       string
@@ -107,8 +112,8 @@ type JobStatusResponse struct {
 	JobID       string `json:"job_id"`
 	Status      string `json:"status"`
 	Progress    int    `json:"progress,omitempty"`
-	CurrentStep string `json:"current_step,omitempty"`
-	Message     string `json:"message,omitempty"`
+	CurrentStep string `json:"current_step,omitempty"` // código do estágio Mnemos durante PROCESSING
+	Message     string `json:"message,omitempty"`      // rótulo amigável do estágio / status Atlas
 	Error       string `json:"error,omitempty"`
 }
 
@@ -117,6 +122,7 @@ type ActiveJobItem struct {
 	Status       string     `json:"status"`
 	Progress     int        `json:"progress"`
 	CurrentStep  string     `json:"current_step"`
+	Message      string     `json:"message,omitempty"`
 	ProjectID    string     `json:"project_id"`
 	ProjectSlug  string     `json:"project_slug"`
 	ProjectName  string     `json:"project_name"`
@@ -413,6 +419,11 @@ func (s *DocumentationService) processJob(jobID string) {
 			if s.isCancelled(ctx, jobID) {
 				return
 			}
+			stage := ai.NormalizeStage(st.Status, st.CurrentStage)
+			if ai.IsTerminalStage(stage) {
+				// COMPLETED/FAILED: deixamos o fluxo final persistir o status Atlas.
+				return
+			}
 			// Mapeia progresso remoto (0–100) para a faixa Atlas 40–95.
 			progress := 40 + (st.Progress * 55 / 100)
 			if progress < 40 {
@@ -421,12 +432,10 @@ func (s *DocumentationService) processJob(jobID string) {
 			if progress > 95 {
 				progress = 95
 			}
-			step := st.CurrentStage
+			// current_step = código Mnemos (ex.: READING_CHUNKS) para o front mapear.
+			step := stage
 			if step == "" {
-				step = st.Status
-			}
-			if step == "" {
-				step = "Processando no Serviço de IA"
+				step = "PROCESSING"
 			}
 			_ = s.docs.UpdateJobStatus(ctx, jobID, domain.DocJobProcessing, progress, step, nil)
 		},
@@ -492,6 +501,7 @@ func (s *DocumentationService) processJob(jobID string) {
 	_ = s.docs.LinkFilesToVersion(ctx, job.ID, version.ID)
 	_ = s.docs.SetJobVersion(ctx, job.ID, version.ID)
 	_ = s.docs.UpdateJobStatus(ctx, job.ID, domain.DocJobCompleted, 100, "Concluído", nil)
+	notifyMnemos(s.sync, job.ProjectID)
 }
 
 func (s *DocumentationService) isCancelled(ctx context.Context, jobID string) bool {
@@ -515,6 +525,9 @@ func (s *DocumentationService) GetJob(ctx context.Context, user domain.User, job
 	if job.Status != domain.DocJobCompleted {
 		resp.Progress = job.Progress
 		resp.CurrentStep = job.CurrentStep
+		resp.Message = jobStageMessage(job.Status, job.CurrentStep)
+	} else {
+		resp.Message = "Concluído"
 	}
 	if job.ErrorMessage != nil {
 		resp.Error = *job.ErrorMessage
@@ -564,6 +577,7 @@ func (s *DocumentationService) ListActiveJobs(ctx context.Context, user domain.U
 			Status:      string(row.Job.Status),
 			Progress:    row.Job.Progress,
 			CurrentStep: row.Job.CurrentStep,
+			Message:     jobStageMessage(row.Job.Status, row.Job.CurrentStep),
 			ProjectID:   row.Job.ProjectID,
 			ProjectSlug: row.ProjectSlug,
 			ProjectName: name,
@@ -695,6 +709,7 @@ func (s *DocumentationService) DeleteVersion(ctx context.Context, user domain.Us
 		Action: "Removeu documentação", Target: "versão " + strconv.Itoa(version.VersionNumber),
 		EntityType: strPtr("documentation_version"), EntityID: strPtr(versionID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return nil
 }
 
@@ -879,6 +894,33 @@ func detectDocMime(filename string) string {
 		return "application/msword"
 	default:
 		return "application/octet-stream"
+	}
+}
+
+// jobStageMessage rótulo para o front: prioriza estágio Mnemos em current_step.
+func jobStageMessage(status domain.DocumentationJobStatus, currentStep string) string {
+	if currentStep != "" {
+		return ai.StageLabel(currentStep)
+	}
+	switch status {
+	case domain.DocJobPending:
+		return "Na fila"
+	case domain.DocJobValidating:
+		return "Validando arquivos"
+	case domain.DocJobUploadingFiles:
+		return "Preparando arquivos"
+	case domain.DocJobWaitingAI:
+		return "Enviando ao Serviço de IA"
+	case domain.DocJobProcessing:
+		return "Processando no Serviço de IA"
+	case domain.DocJobCompleted:
+		return "Concluído"
+	case domain.DocJobFailed:
+		return "Falhou"
+	case domain.DocJobCancelled:
+		return "Cancelado"
+	default:
+		return string(status)
 	}
 }
 

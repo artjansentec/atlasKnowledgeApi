@@ -137,6 +137,73 @@ paths:
         '200':
           description: Resultados agrupados
 
+  /api/v1/rag/search:
+    post:
+      tags: [search]
+      summary: Busca semântica RAG via Mnemos
+      description: |
+        Autentica o usuário, filtra `project_ids` pelos projetos acessíveis
+        e encaminha a pergunta ao Mnemos (`POST /v1/rag/search`).
+        Se `project_ids` for omitido ou vazio, usa todos os projetos que o usuário pode ler.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question:
+                  type: string
+                  example: Quais são os requisitos de autenticação?
+                project_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Opcional; subset dos projetos acessíveis
+      responses:
+        '200':
+          description: Resposta com fontes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  answer:
+                    type: string
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        project_id:
+                          type: string
+                        project_name:
+                          type: string
+                        kind:
+                          type: string
+                        source_type:
+                          type: string
+                        source_id:
+                          type: string
+                        title:
+                          type: string
+                        score:
+                          type: number
+                  chunks_used:
+                    type: integer
+                  score:
+                    type: number
+        '403':
+          description: Sem projetos acessíveis
+        '422':
+          description: question ausente
+        '502':
+          description: Mnemos indisponível ou RAG desabilitado
+
   /api/v1/projects:
     get:
       tags: [projects]

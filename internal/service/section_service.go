@@ -12,10 +12,15 @@ type SectionService struct {
 	projects *repository.ProjectRepository
 	sections *repository.SectionRepository
 	audit    *repository.AuditRepository
+	sync     MnemosProjectSyncer
 }
 
 func NewSectionService(projects *repository.ProjectRepository, sections *repository.SectionRepository, audit *repository.AuditRepository) *SectionService {
 	return &SectionService{projects: projects, sections: sections, audit: audit}
+}
+
+func (s *SectionService) SetMnemosSync(h MnemosProjectSyncer) {
+	s.sync = h
 }
 
 type CreateSectionInput struct {
@@ -84,6 +89,7 @@ func (s *SectionService) Create(ctx context.Context, user domain.User, slug stri
 		Action: "Adicionou", Target: input.Title,
 		EntityType: strPtr(auditEntityType(kind)), EntityID: strPtr(section.ID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return section, nil
 }
 
@@ -111,6 +117,7 @@ func (s *SectionService) Patch(ctx context.Context, user domain.User, slug, sect
 		Action: "Atualizou", Target: section.Title,
 		EntityType: strPtr(auditEntityType(kind)), EntityID: strPtr(sectionID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return s.sections.GetByID(ctx, project.ID, sectionID, kind)
 }
 
@@ -135,6 +142,7 @@ func (s *SectionService) Delete(ctx context.Context, user domain.User, slug, sec
 		Action: "Removeu", Target: section.Title,
 		EntityType: strPtr(auditEntityType(kind)), EntityID: strPtr(sectionID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return nil
 }
 
@@ -146,7 +154,11 @@ func (s *SectionService) Reorder(ctx context.Context, user domain.User, slug str
 	if err := s.authorize(ctx, user, *project, kind); err != nil {
 		return err
 	}
-	return s.sections.Reorder(ctx, project.ID, kind, items)
+	if err := s.sections.Reorder(ctx, project.ID, kind, items); err != nil {
+		return err
+	}
+	notifyMnemos(s.sync, project.ID)
+	return nil
 }
 
 func auditEntityType(kind domain.SectionKind) string {

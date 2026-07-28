@@ -14,6 +14,7 @@ type LessonService struct {
 	tags     *repository.TagRepository
 	audit    *repository.AuditRepository
 	pool     pgxPool
+	sync     MnemosProjectSyncer
 }
 
 func NewLessonService(
@@ -24,6 +25,10 @@ func NewLessonService(
 	pool pgxPool,
 ) *LessonService {
 	return &LessonService{projects: projects, lessons: lessons, tags: tags, audit: audit, pool: pool}
+}
+
+func (s *LessonService) SetMnemosSync(h MnemosProjectSyncer) {
+	s.sync = h
 }
 
 type LessonInput struct {
@@ -89,6 +94,7 @@ func (s *LessonService) Create(ctx context.Context, user domain.User, slug strin
 	if err := tx.Commit(ctx); err != nil {
 		return nil, httperr.Internal("falha ao confirmar transação")
 	}
+	notifyMnemos(s.sync, project.ID)
 	return lesson, nil
 }
 
@@ -153,6 +159,7 @@ func (s *LessonService) Patch(ctx context.Context, user domain.User, slug, lesso
 		Action: "Atualizou", Target: lesson.Title,
 		EntityType: strPtr("lesson"), EntityID: strPtr(lessonID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return s.lessons.GetByID(ctx, project.ID, lessonID)
 }
 
@@ -177,5 +184,6 @@ func (s *LessonService) Delete(ctx context.Context, user domain.User, slug, less
 		Action: "Removeu", Target: lesson.Title,
 		EntityType: strPtr("lesson"), EntityID: strPtr(lessonID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return nil
 }

@@ -76,6 +76,11 @@ type ProjectService struct {
 	audit       *repository.AuditRepository
 	users       *repository.UserRepository
 	pool        pgxPool
+	sync        MnemosProjectSyncer
+}
+
+func (s *ProjectService) SetMnemosSync(h MnemosProjectSyncer) {
+	s.sync = h
 }
 
 type pgxPool interface {
@@ -317,6 +322,7 @@ func (s *ProjectService) Create(ctx context.Context, user domain.User, input Cre
 	if err := tx.Commit(ctx); err != nil {
 		return nil, httperr.Internal("falha ao confirmar transação")
 	}
+	notifyMnemos(s.sync, project.ID)
 	return project, nil
 }
 
@@ -423,7 +429,11 @@ func (s *ProjectService) Patch(ctx context.Context, user domain.User, slug strin
 	if err := tx.Commit(ctx); err != nil {
 		return nil, httperr.Internal("falha ao confirmar transação")
 	}
-	return s.db.GetBySlug(ctx, slug)
+	updated, err := s.db.GetBySlug(ctx, slug)
+	if err == nil && updated != nil {
+		notifyMnemos(s.sync, updated.ID)
+	}
+	return updated, err
 }
 
 func (s *ProjectService) Delete(ctx context.Context, user domain.User, slug string) error {
@@ -434,7 +444,11 @@ func (s *ProjectService) Delete(ctx context.Context, user domain.User, slug stri
 	if err != nil || project == nil {
 		return httperr.NotFound("projeto não encontrado")
 	}
-	return s.db.SoftDelete(ctx, project.ID)
+	if err := s.db.SoftDelete(ctx, project.ID); err != nil {
+		return err
+	}
+	notifyMnemos(s.sync, project.ID)
+	return nil
 }
 
 func (s *ProjectService) SetReaders(ctx context.Context, user domain.User, slug string, userIDs []string) error {

@@ -360,3 +360,41 @@ func (r *ProjectRepository) AccessibleProjectIDs(ctx context.Context, userID str
 	}
 	return ids, rows.Err()
 }
+
+// ListIDs returns a page of active project IDs for Mnemos bootstrap.
+func (r *ProjectRepository) ListIDs(ctx context.Context, page, pageSize int) (ids []string, total int, err error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	if err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM projects WHERE deleted_at IS NULL`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	offset := (page - 1) * pageSize
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT id FROM projects
+		WHERE deleted_at IS NULL
+		ORDER BY updated_at DESC, id
+		LIMIT $1 OFFSET $2
+	`, pageSize, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, 0, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, total, rows.Err()
+}

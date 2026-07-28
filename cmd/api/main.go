@@ -120,6 +120,7 @@ func main() {
 	documentationRepo := repository.NewDocumentationRepository(database)
 
 	aiClient := ai.NewClient(cfg.AIServiceURL, cfg.AIServiceTimeout)
+	mnemosSync := ai.NewSyncNotifier(aiClient)
 
 	authSvc := service.NewAuthService(cfg, userRepo, refreshRepo)
 	projectSvc := service.NewProjectService(projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, auditRepo, userRepo, database.Pool)
@@ -132,6 +133,16 @@ func main() {
 	documentationSvc := service.NewDocumentationService(
 		cfg, projectRepo, documentationRepo, fileRepo, userRepo, auditRepo, fileStore, aiClient, database.Pool,
 	)
+	ragSvc := service.NewRAGService(projectRepo, aiClient)
+	knowledgeSvc := service.NewProjectKnowledgeService(
+		projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, userRepo, documentationRepo, fileStore,
+	)
+
+	projectSvc.SetMnemosSync(mnemosSync)
+	sectionSvc.SetMnemosSync(mnemosSync)
+	lessonSvc.SetMnemosSync(mnemosSync)
+	attachmentSvc.SetMnemosSync(mnemosSync)
+	documentationSvc.SetMnemosSync(mnemosSync)
 
 	authMW := middleware.NewAuthMiddleware(authSvc, cfg)
 	loginLimiter := middleware.NewRateLimiter(10)
@@ -145,12 +156,15 @@ func main() {
 	attachmentHandler := handler.NewAttachmentHandler(attachmentSvc)
 	devAttachmentHandler := handler.NewDevAttachmentHandler(attachmentSvc)
 	searchHandler := handler.NewSearchHandler(searchSvc)
+	ragHandler := handler.NewRAGHandler(ragSvc)
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 	documentationHandler := handler.NewDocumentationHandler(documentationSvc)
+	internalHandler := handler.NewInternalHandler(knowledgeSvc)
 	mnemosSvc := service.NewMnemosService(
 		cfg, projectRepo, sectionRepo, attachmentRepo, fileRepo, userRepo, auditRepo, fileStore, database.Pool,
 	)
+	mnemosSvc.SetMnemosSync(mnemosSync)
 	mnemosHandler := handler.NewMnemosHandler(mnemosSvc)
 
 	e := echo.New()
@@ -178,6 +192,7 @@ func main() {
 	protected.GET("/users", userHandler.List)
 	protected.GET("/dashboard/summary", dashboardHandler.Summary)
 	protected.GET("/search", searchHandler.Search, searchLimiter.Middleware())
+	protected.POST("/rag/search", ragHandler.Search, searchLimiter.Middleware())
 
 	protected.GET("/project-statuses", projectHandler.ListStatuses)
 	protected.GET("/projects", projectHandler.List)
@@ -225,6 +240,11 @@ func main() {
 	mnemosAPI.PATCH("/projects/:slug", mnemosHandler.Patch)
 	mnemosAPI.PUT("/projects/:slug/structure", mnemosHandler.ApplyStructure)
 	mnemosAPI.POST("/projects/:slug/attachments", mnemosHandler.UploadAttachments)
+
+	// Endpoints internos para o Mnemos puxar conhecimento (mesma auth)
+	internalAPI := api.Group("/internal", authMW.RequireMnemosAuth)
+	internalAPI.GET("/projects", internalHandler.ListProjectIDs)
+	internalAPI.GET("/projects/:id/knowledge", internalHandler.GetProjectKnowledge)
 
 	go func() {
 		printStartupBanner(cfg)

@@ -268,6 +268,9 @@ A especificação OpenAPI também está em `GET /openapi.yaml`.
 | `GET` | `/users` | JWT |
 | `GET` | `/dashboard/summary` | JWT |
 | `GET` | `/search?q=` | JWT |
+| `POST` | `/rag/search` | JWT |
+| `GET` | `/internal/projects` | Mnemos API key / admin JWT |
+| `GET` | `/internal/projects/:id/knowledge` | Mnemos API key / admin JWT |
 | `GET` | `/project-statuses` | JWT |
 | `GET` | `/projects` | JWT |
 | `GET` | `/projects/:slug` | JWT |
@@ -314,6 +317,34 @@ Front (usuário logado)
 
 Se o Mnemos estiver com `ATLAS_SYNC_ENABLED=true`, ele também pode **empurrar** `project` / `sections` / anexos de volta nas rotas `/api/v1/mnemos/*` (ver seção seguinte), atribuindo tudo ao usuário que pediu a geração.
 
+### Busca semântica RAG
+
+`POST /api/v1/rag/search` — JWT obrigatório.
+
+O Atlas resolve as permissões e só então chama o Mnemos:
+
+```text
+Front (usuário logado)
+  → POST /api/v1/rag/search  { question, project_ids? }
+  → Atlas: AccessibleProjectIDs (+ interseção com project_ids)
+  → POST {AI_SERVICE_URL}/v1/rag/search  { question, project_ids }
+  → retorna answer + sources
+```
+
+Após qualquer mudança de conhecimento (projeto, seção, lição, anexo, docs IA…), o Atlas notifica:
+
+```text
+→ POST {AI_SERVICE_URL}/internal/sync/project  { "project_id" }
+→ Mnemos puxa GET /api/v1/internal/projects/{id}/knowledge e reconstrói o índice
+```
+
+Rotas internas (auth `X-Api-Key` / admin JWT):
+
+- `GET /api/v1/internal/projects?page=1` — IDs paginados (bootstrap)
+- `GET /api/v1/internal/projects/:id/knowledge` — corpus textual completo
+
+`project_ids` no search é opcional no Atlas: se omitido, usa todos os projetos que o usuário pode ler.
+
 ### Gerar documentação
 
 `POST /api/v1/projects/:slug/documentation/generate` — `multipart/form-data`
@@ -336,6 +367,36 @@ Resposta imediata (job assíncrono):
 ```
 
 Acompanhe com `GET /api/v1/documentation/jobs/:jobId` ou liste ativos em `GET /api/v1/documentation/jobs`.
+
+Enquanto o Mnemos processa, o job Atlas fica em `status: PROCESSING` e o estágio fino vai em **`current_step`** (código Mnemos) + **`message`** (rótulo em PT):
+
+| `current_step` | `message` |
+|----------------|-----------|
+| `RECEIVED` | Job criado |
+| `VALIDATING` | Checando arquivos |
+| `EXTRACTING` | Lendo arquivos |
+| `OCR` | OCR (reservado) |
+| `TRANSCRIBING` | Transcrição (reservado) |
+| `BUILDING_CONTEXT` | Consolidando texto |
+| `READING_CHUNKS` | Lendo em chunks |
+| `BUILDING_PROMPT` | Montando prompts |
+| `GENERATING` | Gerando documentação |
+| `VALIDATING_RESPONSE` | Validando / sincronizando |
+| `COMPLETED` / `FAILED` | (terminal no Mnemos; Atlas finaliza em seguida) |
+
+Exemplo durante chunks:
+
+```json
+{
+  "job_id": "uuid",
+  "status": "PROCESSING",
+  "progress": 67,
+  "current_step": "READING_CHUNKS",
+  "message": "Lendo em chunks"
+}
+```
+
+O front pode mapear por `current_step` ou exibir `message` direto.
 
 ---
 

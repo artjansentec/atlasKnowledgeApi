@@ -30,6 +30,7 @@ type AttachmentService struct {
 	audit       *repository.AuditRepository
 	storage     storage.FileStorage
 	pool        pgxPool
+	sync        MnemosProjectSyncer
 }
 
 func NewAttachmentService(
@@ -45,6 +46,10 @@ func NewAttachmentService(
 		cfg: cfg, projects: projects, attachments: attachments,
 		files: files, audit: audit, storage: store, pool: pool,
 	}
+}
+
+func (s *AttachmentService) SetMnemosSync(h MnemosProjectSyncer) {
+	s.sync = h
 }
 
 // authorizeWrite valida a permissão de escrita conforme o tipo de anexo:
@@ -128,6 +133,7 @@ func (s *AttachmentService) Upload(ctx context.Context, user domain.User, slug s
 	if err := tx.Commit(ctx); err != nil {
 		return nil, nil, httperr.Internal("falha ao confirmar transação")
 	}
+	notifyMnemos(s.sync, project.ID)
 	return attachment, file, nil
 }
 
@@ -165,6 +171,7 @@ func (s *AttachmentService) Delete(ctx context.Context, user domain.User, slug s
 		Action: "Removeu", Target: name,
 		EntityType: strPtr("attachment"), EntityID: strPtr(attachmentID),
 	})
+	notifyMnemos(s.sync, project.ID)
 	return nil
 }
 

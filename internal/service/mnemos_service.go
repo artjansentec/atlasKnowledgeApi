@@ -89,6 +89,7 @@ type MnemosService struct {
 	audit       *repository.AuditRepository
 	storage     storage.FileStorage
 	pool        pgxPool
+	sync        MnemosProjectSyncer
 }
 
 func NewMnemosService(
@@ -107,6 +108,10 @@ func NewMnemosService(
 		attachments: attachments, files: files, users: users,
 		audit: audit, storage: store, pool: pool,
 	}
+}
+
+func (s *MnemosService) SetMnemosSync(h MnemosProjectSyncer) {
+	s.sync = h
 }
 
 // MnemosCaller descreve quem chama as rotas /mnemos/*.
@@ -301,6 +306,7 @@ func (s *MnemosService) Sync(ctx context.Context, caller MnemosCaller, input Mne
 		return nil, httperr.Internal("falha ao confirmar sincronização")
 	}
 
+	notifyMnemos(s.sync, project.ID)
 	return &MnemosSyncResponse{
 		Created:     created,
 		ProjectID:   project.ID,
@@ -429,6 +435,9 @@ func (s *MnemosService) UploadAttachments(
 			SourceFilename: fh.Filename,
 			Kind:           string(kind),
 		})
+	}
+	if len(results) > 0 {
+		notifyMnemos(s.sync, project.ID)
 	}
 	return results, nil
 }
