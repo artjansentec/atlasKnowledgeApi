@@ -16,6 +16,7 @@ tags:
   - name: auth
   - name: users
   - name: dashboard
+  - name: observability
   - name: search
   - name: projects
   - name: sections
@@ -117,6 +118,89 @@ paths:
       responses:
         '200':
           description: Indicadores e atualizações recentes
+
+  /api/v1/observability/executions:
+    get:
+      tags: [observability]
+      summary: Listar execuções do Mnemos (resumo)
+      description: |
+        Proxy autenticado de `GET {AI_SERVICE_URL}/v1/observability/executions`.
+        Filtra execuções pelos projetos acessíveis ao usuário (admin vê todas).
+        Usado pela tela de dashboard para custos, timings e status de RAG/ingest.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            example: 20
+        - name: operation
+          in: query
+          schema:
+            type: string
+            enum: [question_answering, document_processing]
+          example: question_answering
+        - name: provider
+          in: query
+          schema:
+            type: string
+            example: openai
+        - name: project_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            example: completed
+        - name: model
+          in: query
+          schema:
+            type: string
+            example: gpt-4o-mini
+      responses:
+        '200':
+          description: Lista resumida (sem stages/documents/costs/errors)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+
+  /api/v1/observability/executions/{id}:
+    get:
+      tags: [observability]
+      summary: Detalhe de uma execução do Mnemos
+      description: |
+        Proxy autenticado de `GET {AI_SERVICE_URL}/v1/observability/executions/{id}`.
+        Inclui stages, documents, costs e errors.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Execução completa com filhos
+          content:
+            application/json:
+              schema:
+                type: object
+        '404':
+          description: Execução não encontrada
 
   /api/v1/search:
     get:
@@ -224,6 +308,20 @@ paths:
           in: query
           schema:
             type: string
+        - name: from
+          in: query
+          description: Data inicial de criação (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: '2026-07-01'
+        - name: to
+          in: query
+          description: Data final de criação (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: '2026-07-31'
       responses:
         '200':
           description: Lista resumida de projetos

@@ -100,13 +100,13 @@ func (r *ProjectRepository) List(ctx context.Context, filter domain.ProjectListF
 	}
 
 	if filter.Period != nil {
-		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *filter.Period, idx)
+		clause, periodArgs, nextIdx := dateRangeSQL("created_at", *filter.Period, idx)
 		query += " AND " + clause
 		args = append(args, periodArgs...)
 		idx = nextIdx
 	}
 
-	query += " ORDER BY updated_at DESC"
+	query += " ORDER BY created_at DESC"
 
 	if filter.Limit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", idx)
@@ -217,7 +217,7 @@ func (r *ProjectRepository) CountActive(ctx context.Context, allowedIDs []string
 	idx := 1
 
 	if period != nil {
-		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *period, idx)
+		clause, periodArgs, nextIdx := dateRangeSQL("created_at", *period, idx)
 		query += " AND " + clause
 		args = append(args, periodArgs...)
 		idx = nextIdx
@@ -242,7 +242,7 @@ func (r *ProjectRepository) CountWithStatus(ctx context.Context, allowedIDs []st
 	idx := 2
 
 	if period != nil {
-		clause, periodArgs, nextIdx := dateRangeSQL("updated_at", *period, idx)
+		clause, periodArgs, nextIdx := dateRangeSQL("created_at", *period, idx)
 		query += " AND " + clause
 		args = append(args, periodArgs...)
 		idx = nextIdx

@@ -41,6 +41,13 @@ func (h *ProjectHandler) List(c echo.Context) error {
 		Query:       c.QueryParam("q"),
 		Responsible: c.QueryParam("responsible"),
 	}
+
+	period, err := parseDashboardPeriod(c.QueryParam("from"), c.QueryParam("to"))
+	if err != nil {
+		return Error(c, err)
+	}
+	filter.Period = period
+
 	projects, err := h.projects.List(c.Request().Context(), user, filter)
 	if err != nil {
 		return Error(c, err)

@@ -25,27 +25,51 @@ import (
 )
 
 func printStartupBanner(cfg *config.Config) {
+	const (
+		reset  = "\033[0m"
+		bold   = "\033[1m"
+		dim    = "\033[2m"
+		cyan   = "\033[36m"
+		green  = "\033[32m"
+		yellow = "\033[33m"
+		red    = "\033[31m"
+		blue   = "\033[34m"
+		magenta = "\033[35m"
+	)
+
 	base := fmt.Sprintf("http://localhost:%s", cfg.Port)
 	aiBase := strings.TrimRight(cfg.AIServiceURL, "/")
 	aiGenerateURL := aiBase + "/v1/knowledge/document"
 	aiJobsURL := aiBase + "/v1/jobs/:id"
 	aiStatus, aiHealthURL := probeMnimosHealth(aiBase)
 
+	aiStatusColored := green + "● online" + reset
+	if aiStatus != "online" {
+		aiStatusColored = red + "● offline" + reset
+	}
+
 	lines := []string{
 		"",
-		"  Atlas Knowledge API",
-		"  ─────────────────────────────────────────",
-		fmt.Sprintf("  Status      online"),
-		fmt.Sprintf("  Porta       %s", cfg.Port),
-		fmt.Sprintf("  API         %s/api/v1", base),
-		fmt.Sprintf("  Swagger     %s/swagger", base),
-		fmt.Sprintf("  Health      %s/api/v1/health", base),
-		fmt.Sprintf("  Storage     %s", cfg.StoragePath),
-		fmt.Sprintf("  Mnimos AI   %s", aiGenerateURL),
-		fmt.Sprintf("  Mnimos Jobs %s", aiJobsURL),
-		fmt.Sprintf("  Mnimos      %s  (%s)", aiStatus, aiHealthURL),
-		"  ─────────────────────────────────────────",
-		"  Parar       Ctrl+C",
+		cyan + bold + `     █████╗ ████████╗██╗      █████╗ ███████╗` + reset,
+		cyan + bold + `    ██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝` + reset,
+		blue + bold + `    ███████║   ██║   ██║     ███████║███████╗` + reset,
+		blue + bold + `    ██╔══██║   ██║   ██║     ██╔══██║╚════██║` + reset,
+		magenta + bold + `    ██║  ██║   ██║   ███████╗██║  ██║███████║` + reset,
+		magenta + bold + `    ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝` + reset,
+		"",
+		"  " + bold + cyan + "Knowledge API" + reset + dim + "  ·  wiki corporativa" + reset,
+		"  " + dim + "─────────────────────────────────────────────" + reset,
+		fmt.Sprintf("  %sStatus%s      %s● online%s", bold, reset, green, reset),
+		fmt.Sprintf("  %sPorta%s       %s%s%s", bold, reset, yellow, cfg.Port, reset),
+		fmt.Sprintf("  %sAPI%s         %s%s/api/v1%s", bold, reset, cyan, base, reset),
+		fmt.Sprintf("  %sSwagger%s     %s%s/swagger%s", bold, reset, cyan, base, reset),
+		fmt.Sprintf("  %sHealth%s      %s%s/api/v1/health%s", bold, reset, cyan, base, reset),
+		fmt.Sprintf("  %sStorage%s     %s%s%s", bold, reset, dim, cfg.StoragePath, reset),
+		fmt.Sprintf("  %sMnimos AI%s   %s%s%s", bold, reset, dim, aiGenerateURL, reset),
+		fmt.Sprintf("  %sMnimos Jobs%s %s%s%s", bold, reset, dim, aiJobsURL, reset),
+		fmt.Sprintf("  %sMnimos%s      %s  %s(%s)%s", bold, reset, aiStatusColored, dim, aiHealthURL, reset),
+		"  " + dim + "─────────────────────────────────────────────" + reset,
+		"  " + yellow + "Parar" + reset + "       Ctrl+C",
 		"",
 	}
 	fmt.Println(strings.Join(lines, "\n"))
@@ -134,6 +158,7 @@ func main() {
 		cfg, projectRepo, documentationRepo, fileRepo, userRepo, auditRepo, fileStore, aiClient, database.Pool,
 	)
 	ragSvc := service.NewRAGService(projectRepo, aiClient)
+	observabilitySvc := service.NewObservabilityService(projectRepo, aiClient)
 	knowledgeSvc := service.NewProjectKnowledgeService(
 		projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, userRepo, documentationRepo, fileStore,
 	)
@@ -157,6 +182,7 @@ func main() {
 	devAttachmentHandler := handler.NewDevAttachmentHandler(attachmentSvc)
 	searchHandler := handler.NewSearchHandler(searchSvc)
 	ragHandler := handler.NewRAGHandler(ragSvc)
+	observabilityHandler := handler.NewObservabilityHandler(observabilitySvc)
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 	documentationHandler := handler.NewDocumentationHandler(documentationSvc)
@@ -172,7 +198,7 @@ func main() {
 	e.HidePort = true
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
-	e.Use(echomw.Logger())
+	e.Use(middleware.ColoredLogger())
 	e.Use(middleware.CORS(cfg))
 	e.Use(echomw.BodyLimit(fmt.Sprintf("%dB", cfg.DocMaxTotalBytes+1024*1024)))
 
@@ -191,6 +217,8 @@ func main() {
 	protected := api.Group("", authMW.RequireAuth)
 	protected.GET("/users", userHandler.List)
 	protected.GET("/dashboard/summary", dashboardHandler.Summary)
+	protected.GET("/observability/executions", observabilityHandler.ListExecutions)
+	protected.GET("/observability/executions/:id", observabilityHandler.GetExecution)
 	protected.GET("/search", searchHandler.Search, searchLimiter.Middleware())
 	protected.POST("/rag/search", ragHandler.Search, searchLimiter.Middleware())
 
@@ -260,11 +288,11 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	fmt.Println("\n⏹  Encerrando API...")
+	fmt.Println("\n" + "\033[33m⏹  Encerrando API...\033[0m")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := e.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("❌ shutdown: %v", err)
 	}
-	fmt.Println("✅ API encerrada.")
+	fmt.Println("\033[32m✅ API encerrada.\033[0m")
 }

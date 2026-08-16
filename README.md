@@ -91,7 +91,7 @@ flowchart TD
     FD --> STO
 
     %% Busca e dashboard
-    MW --> SD["🔍 Busca /search<br/>📊 Dashboard /dashboard/summary<br/>filtro por período"]
+    MW --> SD["🔍 Busca /search<br/>📊 Dashboard /dashboard/summary<br/>📈 Observability /observability/executions<br/>filtro por período"]
 
     %% Persistência
     LP --> DB[("🐘 PostgreSQL")]
@@ -267,6 +267,8 @@ A especificação OpenAPI também está em `GET /openapi.yaml`.
 | `GET` | `/auth/me` | JWT |
 | `GET` | `/users` | JWT |
 | `GET` | `/dashboard/summary` | JWT |
+| `GET` | `/observability/executions` | JWT |
+| `GET` | `/observability/executions/:id` | JWT |
 | `GET` | `/search?q=` | JWT |
 | `POST` | `/rag/search` | JWT |
 | `GET` | `/internal/projects` | Mnemos API key / admin JWT |
@@ -316,6 +318,24 @@ Front (usuário logado)
 ```
 
 Se o Mnemos estiver com `ATLAS_SYNC_ENABLED=true`, ele também pode **empurrar** `project` / `sections` / anexos de volta nas rotas `/api/v1/mnemos/*` (ver seção seguinte), atribuindo tudo ao usuário que pediu a geração.
+
+### Observability (dashboard)
+
+Rotas JWT que proxyam o Mnemos para a tela de dashboard:
+
+```text
+Front (dashboard)
+  → GET /api/v1/observability/executions?limit=20&operation=&provider=
+  → Atlas: AccessibleProjectIDs (filtra itens)
+  → GET {AI_SERVICE_URL}/v1/observability/executions?...
+
+Front (detalhe)
+  → GET /api/v1/observability/executions/:id
+  → GET {AI_SERVICE_URL}/v1/observability/executions/:id
+  → stages + documents + costs + errors
+```
+
+Filtros suportados na lista: `limit`, `operation` (`question_answering` | `document_processing`), `provider`, `project_id`, `status`, `model`.
 
 ### Busca semântica RAG
 

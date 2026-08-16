@@ -188,7 +188,11 @@ func ToProjectListItem(p domain.Project, responsible string, readers, tags, tech
 }
 
 func FormatDate(t time.Time) string {
-	return t.UTC().Format("2006-01-02")
+	loc, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		return t.UTC().Format("2006-01-02")
+	}
+	return t.In(loc).Format("2006-01-02")
 }
 
 func HumanSize(bytes int64) string {
