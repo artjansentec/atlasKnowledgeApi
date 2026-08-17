@@ -1,0 +1,90 @@
+name: atlas-knowledge
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # Só sobe com: docker compose --profile db up -d
+  postgres:
+    profiles: ["db"]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-atlas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-atlas_knowledge}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      # 5434 na máquina para não conflitar com o Postgres local (5432) nem com outros containers
+      - "${POSTGRES_PUBLISH_PORT:-5434}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+    networks:
+      atlas:
+        aliases:
+          - postgres
+      mnemos:
+        aliases:
+          - postgres
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: atlas-knowledge-api:latest
+    container_name: atlas
+    restart: unless-stopped
+    stop_grace_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    tty: true
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      PORT: "8080"
+      STORAGE_PATH: /data/storage
+      TERM: xterm-256color
+      FORCE_COLOR: "1"
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - api_storage:/data/storage
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    logging: *default-logging
+    networks:
+      atlas:
+        aliases:
+          - api
+      mnemos:
+        aliases:
+          - atlas
+
+volumes:
+  postgres_data:
+  api_storage:
+
+networks:
+  atlas:
+    driver: bridge
+  # Rede compartilhada com o Mnemos (o compose do Mnemos deve entrar nela como external).
+  mnemos:
+    name: atlas-mnemos
+    driver: bridge

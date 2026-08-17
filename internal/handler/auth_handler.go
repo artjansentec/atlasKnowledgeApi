@@ -78,7 +78,8 @@ func (h *AuthHandler) setRefreshCookie(c echo.Context, token string) {
 		Value:    token,
 		Path:     "/api/v1/auth",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   h.cfg.CookieSecure,
+		SameSite: h.cfg.CookieSameSite,
 		MaxAge:   int(h.cfg.JWTRefreshTTL.Seconds()),
 	})
 }
@@ -89,6 +90,8 @@ func (h *AuthHandler) clearRefreshCookie(c echo.Context) {
 		Value:    "",
 		Path:     "/api/v1/auth",
 		HttpOnly: true,
+		Secure:   h.cfg.CookieSecure,
+		SameSite: h.cfg.CookieSameSite,
 		MaxAge:   -1,
 	})
 }

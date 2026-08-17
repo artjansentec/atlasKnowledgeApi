@@ -134,7 +134,7 @@ flowchart TD
 </tr>
 <tr>
 <td align="center"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/docker/docker-original.svg" width="36" alt="Docker" /></td>
-<td><b>pgx + golang-migrate</b> — driver Postgres e evolução do schema</td>
+<td><b>Docker</b> — imagem da API + Compose com Postgres para produção</td>
 </tr>
 </table>
 
@@ -158,7 +158,7 @@ flowchart TD
 copy .env.example .env
 ```
 
-Ajuste `DATABASE_URL` no `.env` com usuário, senha e porta do seu Postgres local (padrão: `5432`).
+Ajuste no `.env` o `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD` e `POSTGRES_DB` (padrão: `localhost:5432`).
 
 ### 2. Criar o banco
 
@@ -213,20 +213,112 @@ make run
 
 ---
 
+## Produção com Docker
+
+A stack sobe **só a API**. O banco é o que você configurar no `.env`. O **`POSTGRES_HOST`** é o que define se é externo ou interno.
+
+```bash
+cp .env.production.example .env
+# Preencha POSTGRES_*, JWT_SECRET, ADMIN_PASSWORD, CORS_ORIGINS e API_BASE_URL
+
+docker compose up -d --build
+# ou: make docker-up
+```
+
+No `.env`:
+
+```env
+POSTGRES_HOST=host.docker.internal
+POSTGRES_PORT=5432
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=SENHA
+POSTGRES_DB=atlas_knowledge
+POSTGRES_SSLMODE=disable
+```
+
+| `POSTGRES_HOST` | Significado |
+|-----------------|-------------|
+| `host.docker.internal` | Postgres da **máquina** (API no Docker) |
+| `localhost` | Postgres da máquina (`go run`, sem Docker) |
+| IP ou hostname (RDS, etc.) | Banco remoto |
+| `postgres` | Postgres **interno** (`docker compose --profile db up`) |
+
+Não use `localhost` com a API no Docker: dentro do container isso não é a sua máquina. O Postgres local precisa aceitar a rede Docker (`listen_addresses` e `pg_hba.conf`). Em banco gerenciado use `POSTGRES_SSLMODE=require`.
+
+Para subir um Postgres **junto** com a API:
+
+```bash
+docker compose --profile db up -d --build
+# ou: make docker-up-db
+```
+
+Nesse modo: `POSTGRES_HOST=postgres` (mesmo usuário/senha/banco do container). Na máquina, o banco interno fica em `localhost:5434` (a `5432` já é do Postgres local).
+
+| | |
+|---|---|
+| API | `http://localhost:8080` (ou a porta em `PORT`) |
+| Health | `GET /api/v1/health` |
+| Logs | `make docker-logs` / `docker compose logs -f api` |
+| Parar | `make docker-down` / `docker compose down` |
+
+O Postgres interno é publicado em `localhost:5434`. Uploads ficam no volume `api_storage`.
+
+Coloque um proxy (Nginx, Caddy, Traefik) na frente com HTTPS e aponte `CORS_ORIGINS` / `API_BASE_URL` para as URLs públicas.
+
+### Mnemos também no Docker
+
+`localhost` **não funciona** entre containers: cada um vê só a si mesmo. A conversa é nos dois sentidos, então os dois precisam da mesma rede Docker (`atlas-mnemos`).
+
+| Direção | Variável | Valor no Docker |
+|---------|----------|-----------------|
+| Atlas → Mnemos | `AI_SERVICE_URL` (nesta API) | `http://mnemos:8081` |
+| Mnemos → Atlas | URL da Atlas no compose do Mnemos | `http://atlas:8080` |
+
+No `docker-compose` do Mnemos, entre na rede que esta API cria:
+
+```yaml
+services:
+  mnemos:
+    container_name: mnemos
+    networks:
+      - default
+      - atlas-mnemos
+
+networks:
+  atlas-mnemos:
+    name: atlas-mnemos
+    external: true
+```
+
+Suba **primeiro** a Atlas (`docker compose up -d`) para criar a rede, depois o Mnemos. A chave `MNEMOS_API_KEY` precisa ser a mesma nos dois lados.
+
+**Não use** o `.env` de desenvolvimento local no servidor: `JWT_SECRET` e `ADMIN_PASSWORD` fracos impedem a API de subir com `APP_ENV=production`.
+
+---
+
 ## Variáveis de ambiente
 
 | Variável | Descrição | Padrão |
 |----------|-----------|--------|
+| `APP_ENV` | `development` ou `production` | `development` |
 | `PORT` | Porta HTTP | `8080` |
-| `DATABASE_URL` | Connection string Postgres local | ver `.env.example` |
-| `JWT_SECRET` | Segredo HS256 | `change-me-in-production` |
+| `POSTGRES_HOST` | Host do banco: `localhost`, `host.docker.internal`, IP/RDS ou `postgres` | `localhost` |
+| `POSTGRES_PORT` | Porta do Postgres | `5432` |
+| `POSTGRES_USER` | Usuário do banco | `postgres` |
+| `POSTGRES_PASSWORD` | Senha do banco | `postgres` |
+| `POSTGRES_DB` | Nome do banco | `atlas_knowledge` |
+| `POSTGRES_SSLMODE` | `disable` local; `require` em RDS/Cloud SQL | `disable` |
+| `DATABASE_URL` | Connection string completa (opcional; se existir, ignora as variáveis `POSTGRES_*`) | montada a partir das variáveis acima |
+| `JWT_SECRET` | Segredo HS256 (mín. 32 caracteres em produção) | `change-me-in-production` |
 | `JWT_ACCESS_TTL` | Expiração access token | `15m` |
 | `JWT_REFRESH_TTL` | Expiração refresh token | `168h` |
 | `STORAGE_PATH` | Pasta de uploads locais | `./storage` |
 | `MAX_UPLOAD_BYTES` | Tamanho máximo upload | `20971520` (20 MB) |
 | `CORS_ORIGINS` | Origens permitidas (vírgula) | `http://localhost:5173` |
+| `COOKIE_SECURE` | Cookie de refresh só em HTTPS | `true` se `APP_ENV=production` |
+| `COOKIE_SAMESITE` | `lax`, `strict` ou `none` (use `none` se o front estiver em outro domínio) | `lax` |
 | `API_BASE_URL` | URL base usada em links de download de anexos | `http://localhost:{PORT}` |
-| `AI_SERVICE_URL` | Base URL do Mnemos | `http://localhost:8081` |
+| `AI_SERVICE_URL` | Base URL do Mnemos (`http://mnemos:8081` se os dois estiverem no Docker) | `http://localhost:8081` |
 | `AI_SERVICE_TIMEOUT` | Timeout ao aguardar o job de IA (polling até completar) | `30m` |
 | `DOC_MAX_FILES` | Máximo de arquivos por geração | `20` |
 | `DOC_MAX_FILE_BYTES` | Tamanho máximo por arquivo na geração | `20971520` (20 MB) |

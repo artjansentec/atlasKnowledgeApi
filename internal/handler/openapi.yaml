@@ -33,7 +33,7 @@ paths:
       description: Verifica se a API e o banco estão respondendo.
       responses:
         '200':
-          description: OK
+          description: API e banco respondendo
           content:
             application/json:
               schema:
@@ -45,6 +45,19 @@ paths:
                   database:
                     type: string
                     example: connected
+        '503':
+          description: Banco indisponível
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: degraded
+                  database:
+                    type: string
+                    example: disconnected
 
   /api/v1/auth/login:
     post:

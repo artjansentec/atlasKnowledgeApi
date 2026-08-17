@@ -33,8 +33,11 @@ func printStartupBanner(cfg *config.Config) {
 		green  = "\033[32m"
 		yellow = "\033[33m"
 		red    = "\033[31m"
-		blue   = "\033[34m"
-		magenta = "\033[35m"
+		ember  = "\033[38;5;196m"
+		flame  = "\033[38;5;202m"
+		orange = "\033[38;5;208m"
+		amber  = "\033[38;5;214m"
+		coral  = "\033[38;5;203m"
 	)
 
 	base := fmt.Sprintf("http://localhost:%s", cfg.Port)
@@ -50,14 +53,21 @@ func printStartupBanner(cfg *config.Config) {
 
 	lines := []string{
 		"",
-		cyan + bold + `     █████╗ ████████╗██╗      █████╗ ███████╗` + reset,
-		cyan + bold + `    ██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝` + reset,
-		blue + bold + `    ███████║   ██║   ██║     ███████║███████╗` + reset,
-		blue + bold + `    ██╔══██║   ██║   ██║     ██╔══██║╚════██║` + reset,
-		magenta + bold + `    ██║  ██║   ██║   ███████╗██║  ██║███████║` + reset,
-		magenta + bold + `    ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝` + reset,
+		bold + ember + `     █████╗ ████████╗██╗      █████╗ ███████╗` + reset,
+		bold + flame + `    ██╔══██╗╚══██╔══╝██║     ██╔══██╗██╔════╝` + reset,
+		bold + orange + `    ███████║   ██║   ██║     ███████║███████╗` + reset,
+		bold + amber + `    ██╔══██║   ██║   ██║     ██╔══██║╚════██║` + reset,
+		bold + coral + `    ██║  ██║   ██║   ███████╗██║  ██║███████║` + reset,
+		ember + `    ╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝╚══════╝` + reset,
 		"",
-		"  " + bold + cyan + "Knowledge API" + reset + dim + "  ·  wiki corporativa" + reset,
+		bold + ember + `    ██████╗  █████╗  ██████╗██╗  ██╗███████╗███╗   ██╗██████╗` + reset,
+		bold + flame + `    ██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██╔════╝████╗  ██║██╔══██╗` + reset,
+		bold + orange + `    ██████╔╝███████║██║     █████╔╝ █████╗  ██╔██╗ ██║██║  ██║` + reset,
+		bold + amber + `    ██╔══██╗██╔══██║██║     ██╔═██╗ ██╔══╝  ██║╚██╗██║██║  ██║` + reset,
+		bold + coral + `    ██████╔╝██║  ██║╚██████╗██║  ██╗███████╗██║ ╚████║██████╔╝` + reset,
+		ember + `    ╚═════╝ ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═══╝╚═════╝` + reset,
+		"",
+		"  " + bold + ember + "Atlas" + reset + " " + bold + orange + "Backend" + reset + dim + "  ·  wiki corporativa" + reset,
 		"  " + dim + "─────────────────────────────────────────────" + reset,
 		fmt.Sprintf("  %sStatus%s      %s● online%s", bold, reset, green, reset),
 		fmt.Sprintf("  %sPorta%s       %s%s%s", bold, reset, yellow, cfg.Port, reset),

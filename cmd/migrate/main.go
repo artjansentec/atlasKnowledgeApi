@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/atlas/knowledge-api/internal/config"
 	"github.com/atlas/knowledge-api/internal/db"
 	"github.com/joho/godotenv"
 )
@@ -17,10 +18,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL não definido — copie .env.example para .env")
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("config: %v", err)
 	}
+	databaseURL := cfg.DatabaseURL
 
 	switch os.Args[1] {
 	case "up":

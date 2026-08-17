@@ -1,4 +1,4 @@
-.PHONY: run run-api migrate-up migrate-down create-admin test lint help
+.PHONY: run run-api migrate-up migrate-down create-admin test lint docker-build docker-up docker-up-db docker-down docker-logs help
 
 MIGRATE ?= migrate
 DB_URL ?= $(shell grep DATABASE_URL .env 2>/dev/null | cut -d= -f2-)
@@ -45,6 +45,10 @@ help:
 	@printf "  $(C_BLUE)make migrate-up$(C_RESET)    aplica migrations\n"
 	@printf "  $(C_BLUE)make migrate-down$(C_RESET)  reverte 1 migration\n"
 	@printf "  $(C_MAGENTA)make create-admin$(C_RESET)  cria admin (EMAIL/PASSWORD/NAME)\n"
+	@printf "  $(C_CYAN)make docker-up$(C_RESET)     sobe a API (banco externo via DATABASE_URL)\n"
+	@printf "  $(C_CYAN)make docker-up-db$(C_RESET)  sobe API + Postgres interno\n"
+	@printf "  $(C_CYAN)make docker-down$(C_RESET)   para os containers\n"
+	@printf "  $(C_CYAN)make docker-logs$(C_RESET)   acompanha logs da API\n"
 	@printf "\n"
 
 run:
@@ -89,3 +93,33 @@ lint:
 			exit $$code; \
 		fi; \
 	fi
+
+docker-build:
+	@$(call say,construindo imagem Docker…)
+	docker compose build
+
+docker-up:
+	@$(call say,subindo stack de produção…)
+	@if [ ! -f .env ]; then \
+		$(call fail,.env ausente — copie .env.production.example para .env e preencha os valores); \
+		exit 1; \
+	fi
+	docker compose up -d --build
+	@$(call ok,stack no ar — API em http://localhost:$${PORT:-8080})
+
+docker-up-db:
+	@$(call say,subindo API + Postgres interno…)
+	@if [ ! -f .env ]; then \
+		$(call fail,.env ausente — copie .env.production.example para .env e preencha os valores); \
+		exit 1; \
+	fi
+	docker compose --profile db up -d --build
+	@$(call ok,stack no ar — API em http://localhost:$${PORT:-8080})
+
+docker-down:
+	@$(call say,parando containers…)
+	docker compose down
+	@$(call ok,stack parado)
+
+docker-logs:
+	docker compose logs -f api

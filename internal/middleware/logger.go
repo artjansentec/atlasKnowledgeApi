@@ -8,6 +8,16 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+func wantColor() bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	if os.Getenv("FORCE_COLOR") != "" || os.Getenv("CLICOLOR_FORCE") != "" {
+		return true
+	}
+	return os.Getenv("TERM") != "dumb"
+}
+
 const (
 	ansiReset   = "\033[0m"
 	ansiBold    = "\033[1m"
@@ -23,7 +33,7 @@ const (
 
 // ColoredLogger imprime requests HTTP com cores por status e método.
 func ColoredLogger() echo.MiddlewareFunc {
-	useColor := os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+	useColor := wantColor()
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
