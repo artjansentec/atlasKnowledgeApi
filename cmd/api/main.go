@@ -142,6 +142,7 @@ func main() {
 	auditRepo := repository.NewAuditRepository(database)
 	tagRepo := repository.NewTagRepository(database)
 	documentationRepo := repository.NewDocumentationRepository(database)
+	aiSettingsRepo := repository.NewAISettingsRepository(database)
 
 	aiClient := ai.NewClient(cfg.AIServiceURL, cfg.AIServiceTimeout)
 	mnemosSync := ai.NewSyncNotifier(aiClient)
@@ -154,8 +155,9 @@ func main() {
 	searchSvc := service.NewSearchService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo)
 	dashboardSvc := service.NewDashboardService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo, tagRepo)
 	userSvc := service.NewUserListService(userRepo)
+	aiSettingsSvc := service.NewAISettingsService(aiSettingsRepo)
 	documentationSvc := service.NewDocumentationService(
-		cfg, projectRepo, documentationRepo, fileRepo, userRepo, auditRepo, fileStore, aiClient, database.Pool,
+		cfg, projectRepo, documentationRepo, fileRepo, userRepo, auditRepo, aiSettingsRepo, fileStore, aiClient, database.Pool,
 	)
 	ragSvc := service.NewRAGService(projectRepo, aiClient)
 	observabilitySvc := service.NewObservabilityService(projectRepo, aiClient)
@@ -186,6 +188,7 @@ func main() {
 	dashboardHandler := handler.NewDashboardHandler(dashboardSvc)
 	userHandler := handler.NewUserHandler(userSvc)
 	documentationHandler := handler.NewDocumentationHandler(documentationSvc)
+	aiSettingsHandler := handler.NewAISettingsHandler(aiSettingsSvc)
 	internalHandler := handler.NewInternalHandler(knowledgeSvc)
 	mnemosSvc := service.NewMnemosService(
 		cfg, projectRepo, sectionRepo, attachmentRepo, fileRepo, userRepo, auditRepo, fileStore, database.Pool,
@@ -223,6 +226,8 @@ func main() {
 	protected.POST("/rag/search", ragHandler.Search, searchLimiter.Middleware())
 
 	protected.GET("/project-statuses", projectHandler.ListStatuses)
+	protected.GET("/ai-settings", aiSettingsHandler.Get)
+	protected.PUT("/ai-settings", aiSettingsHandler.Update)
 	protected.GET("/projects", projectHandler.List)
 	protected.GET("/projects/:slug", projectHandler.Get)
 	protected.POST("/projects", projectHandler.Create)
@@ -273,6 +278,7 @@ func main() {
 	internalAPI := api.Group("/internal", authMW.RequireMnemosAuth)
 	internalAPI.GET("/projects", internalHandler.ListProjectIDs)
 	internalAPI.GET("/projects/:id/knowledge", internalHandler.GetProjectKnowledge)
+	internalAPI.GET("/ai-settings", aiSettingsHandler.GetInternal)
 
 	go func() {
 		printStartupBanner(cfg)

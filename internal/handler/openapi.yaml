@@ -15,6 +15,7 @@ tags:
   - name: health
   - name: auth
   - name: users
+  - name: ai-settings
   - name: dashboard
   - name: observability
   - name: search
@@ -108,6 +109,67 @@ paths:
       responses:
         '200':
           description: Lista de usuários
+
+  /api/v1/ai-settings:
+    get:
+      tags: [ai-settings]
+      summary: Obter configurações de IA
+      description: |
+        Retorna provider, model, baseUrl e se a API key está configurada (sem expor a chave).
+        Apenas admin.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Configurações públicas (chave mascarada)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISettingsPublic'
+        '403':
+          description: Apenas admin
+    put:
+      tags: [ai-settings]
+      summary: Atualizar configurações de IA
+      description: |
+        Persiste `AI_PROVIDER`, `AI_MODEL`, `AI_BASE_URL` e `AI_API_KEY` na tabela `ai_settings`.
+        Se `apiKey` for omitido, a chave atual é mantida. Apenas admin.
+        O Mnemos recebe esses valores no multipart da geração e via `GET /internal/ai-settings`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AISettingsUpdate'
+      responses:
+        '200':
+          description: Configurações atualizadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISettingsPublic'
+        '403':
+          description: Apenas admin
+
+  /api/v1/internal/ai-settings:
+    get:
+      tags: [mnemos]
+      summary: Configurações de IA (Mnemos)
+      description: |
+        Endpoint máquina-a-máquina com a chave completa.
+        Auth: `X-Api-Key` (`MNEMOS_API_KEY`) ou JWT admin.
+      security:
+        - apiKeyAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Credenciais para o provedor de IA
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AISettingsInternal'
 
   /api/v1/dashboard/summary:
     get:
@@ -772,6 +834,57 @@ components:
       example: meu-projeto
 
   schemas:
+    AISettingsPublic:
+      type: object
+      properties:
+        provider:
+          type: string
+          example: openai
+        model:
+          type: string
+          example: gpt-4o-mini
+        baseUrl:
+          type: string
+          example: https://api.openai.com/v1
+        apiKeyConfigured:
+          type: boolean
+        apiKeyPreview:
+          type: string
+          example: sk-p…xxxx
+        updatedBy:
+          type: string
+          format: uuid
+        updatedAt:
+          type: string
+          format: date-time
+
+    AISettingsUpdate:
+      type: object
+      required: [provider, model]
+      properties:
+        provider:
+          type: string
+          enum: [openai, anthropic, gemini, ollama, azure]
+        model:
+          type: string
+        baseUrl:
+          type: string
+        apiKey:
+          type: string
+          description: Omitir para manter a chave atual; string vazia limpa a chave
+
+    AISettingsInternal:
+      type: object
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        api_key:
+          type: string
+        base_url:
+          type: string
+
     LoginResponse:
       type: object
       properties:

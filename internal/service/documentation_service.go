@@ -68,16 +68,17 @@ var docAllowedMimes = map[string]bool{
 }
 
 type DocumentationService struct {
-	cfg      *config.Config
-	projects *repository.ProjectRepository
-	docs     *repository.DocumentationRepository
-	files    *repository.FileRepository
-	users    *repository.UserRepository
-	audit    *repository.AuditRepository
-	storage  storage.FileStorage
-	ai       *ai.Client
-	pool     pgxPool
-	sync     MnemosProjectSyncer
+	cfg        *config.Config
+	projects   *repository.ProjectRepository
+	docs       *repository.DocumentationRepository
+	files      *repository.FileRepository
+	users      *repository.UserRepository
+	audit      *repository.AuditRepository
+	aiSettings *repository.AISettingsRepository
+	storage    storage.FileStorage
+	ai         *ai.Client
+	pool       pgxPool
+	sync       MnemosProjectSyncer
 }
 
 func NewDocumentationService(
@@ -87,13 +88,14 @@ func NewDocumentationService(
 	files *repository.FileRepository,
 	users *repository.UserRepository,
 	audit *repository.AuditRepository,
+	aiSettings *repository.AISettingsRepository,
 	store storage.FileStorage,
 	aiClient *ai.Client,
 	pool pgxPool,
 ) *DocumentationService {
 	return &DocumentationService{
 		cfg: cfg, projects: projects, docs: docs, files: files,
-		users: users, audit: audit, storage: store, ai: aiClient, pool: pool,
+		users: users, audit: audit, aiSettings: aiSettings, storage: store, ai: aiClient, pool: pool,
 	}
 }
 
@@ -407,6 +409,18 @@ func (s *DocumentationService) processJob(jobID string) {
 		return
 	}
 
+	var aiCfg *ai.AISettings
+	if s.aiSettings != nil {
+		if stored, err := s.aiSettings.Get(ctx); err == nil && stored != nil {
+			aiCfg = &ai.AISettings{
+				Provider: stored.Provider,
+				Model:    stored.Model,
+				APIKey:   stored.APIKey,
+				BaseURL:  stored.BaseURL,
+			}
+		}
+	}
+
 	result, err := s.ai.Generate(aiCtx, ai.GenerateRequest{
 		ProjectID:         job.ProjectID,
 		ProjectSlug:       project.Slug,
@@ -415,6 +429,7 @@ func (s *DocumentationService) processJob(jobID string) {
 		GenerationOptions: job.GenerationOptions,
 		Files:             aiFiles,
 		RequestedBy:       job.CreatedBy,
+		AISettings:        aiCfg,
 		OnProgress: func(st ai.JobStatus) {
 			if s.isCancelled(ctx, jobID) {
 				return

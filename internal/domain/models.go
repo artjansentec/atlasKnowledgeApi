@@ -264,3 +264,15 @@ type DocumentationFile struct {
 	ContentHash *string
 	CreatedAt   time.Time
 }
+
+// AISettings é a configuração global do provedor de IA (singleton no banco).
+// Fonte de verdade no Atlas; o Mnemos recebe via endpoint interno ou multipart.
+type AISettings struct {
+	Provider  string
+	Model     string
+	APIKey    string
+	BaseURL   string
+	UpdatedBy *string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}

@@ -15,6 +15,14 @@ import (
 	"github.com/atlas/knowledge-api/pkg/httperr"
 )
 
+// AISettings são as credenciais/modelo do provedor, lidos do banco Atlas.
+type AISettings struct {
+	Provider string
+	Model    string
+	APIKey   string
+	BaseURL  string
+}
+
 // GenerateRequest agrupa os dados enviados ao Serviço de IA.
 type GenerateRequest struct {
 	ProjectID         string
@@ -25,6 +33,8 @@ type GenerateRequest struct {
 	Files             []FileInput
 	// RequestedBy é o UUID do usuário logado no Atlas (responsável no sync de volta).
 	RequestedBy string
+	// AISettings vêm da tabela ai_settings e sobrescrevem o .env do Mnemos no job.
+	AISettings *AISettings
 	// OnProgress é chamado a cada atualização do job remoto (opcional).
 	OnProgress func(JobStatus)
 }
@@ -148,6 +158,20 @@ func (c *Client) submitDocument(ctx context.Context, req GenerateRequest) (strin
 	if req.RequestedBy != "" {
 		_ = writer.WriteField("responsible_user_id", req.RequestedBy)
 		_ = writer.WriteField("requested_by", req.RequestedBy)
+	}
+	if req.AISettings != nil {
+		if req.AISettings.Provider != "" {
+			_ = writer.WriteField("ai_provider", req.AISettings.Provider)
+		}
+		if req.AISettings.Model != "" {
+			_ = writer.WriteField("ai_model", req.AISettings.Model)
+		}
+		if req.AISettings.APIKey != "" {
+			_ = writer.WriteField("ai_api_key", req.AISettings.APIKey)
+		}
+		if req.AISettings.BaseURL != "" {
+			_ = writer.WriteField("ai_base_url", req.AISettings.BaseURL)
+		}
 	}
 
 	for _, f := range req.Files {

@@ -273,7 +273,10 @@ A especificação OpenAPI também está em `GET /openapi.yaml`.
 | `POST` | `/rag/search` | JWT |
 | `GET` | `/internal/projects` | Mnemos API key / admin JWT |
 | `GET` | `/internal/projects/:id/knowledge` | Mnemos API key / admin JWT |
+| `GET` | `/internal/ai-settings` | Mnemos API key / admin JWT |
 | `GET` | `/project-statuses` | JWT |
+| `GET` | `/ai-settings` | JWT (admin) |
+| `PUT` | `/ai-settings` | JWT (admin) |
 | `GET` | `/projects` | JWT |
 | `GET` | `/projects/:slug` | JWT |
 | `POST` | `/projects` | JWT (admin) |
@@ -305,78 +308,139 @@ A especificação OpenAPI também está em `GET /openapi.yaml`.
 
 ## Documentação com IA (Mnemos)
 
-A Atlas **orquestra** a geração: valida permissões, armazena arquivos, cria um job local, envia ao Mnemos e persiste o resultado em versões. A inteligência artificial roda só no serviço Mnemos.
+A Atlas **orquestra** a geração: valida permissões, armazena arquivos, cria um job local, envia ao Mnemos e persiste o resultado em versões. A inteligência artificial roda **só** no serviço Mnemos.
 
-```text
-Front (usuário logado)
-  → POST /api/v1/projects/:slug/documentation/generate
-  → Atlas valida + salva arquivos + cria job
-  → POST {AI_SERVICE_URL}/v1/knowledge/document
-       (files + project_id/name/description + responsible_user_id)
-  → polling GET {AI_SERVICE_URL}/v1/jobs/:id
-  → persiste documentation_versions
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Front as Front (usuário logado)
+    participant Atlas as Atlas API
+    participant DB as Postgres<br/>ai_settings
+    participant Mnemos as Mnemos (IA)
+
+    Front->>Atlas: POST /projects/:slug/documentation/generate
+    Atlas->>Atlas: valida + salva arquivos + cria job
+    Atlas->>DB: lê ai_settings<br/>(provider, model, api_key, base_url)
+    Atlas->>Mnemos: POST /v1/knowledge/document<br/>(files + project + responsible_user_id<br/>+ ai_provider / ai_model / ai_api_key / ai_base_url)
+    loop polling
+        Atlas->>Mnemos: GET /v1/jobs/:id
+    end
+    Atlas->>DB: persiste documentation_versions
 ```
 
-Se o Mnemos estiver com `ATLAS_SYNC_ENABLED=true`, ele também pode **empurrar** `project` / `sections` / anexos de volta nas rotas `/api/v1/mnemos/*` (ver seção seguinte), atribuindo tudo ao usuário que pediu a geração.
+### Configuração de IA (`ai_settings`)
+
+> Fonte de verdade de `AI_PROVIDER`, `AI_MODEL`, `AI_API_KEY` e `AI_BASE_URL`: tabela singleton **`ai_settings`** no Postgres do Atlas — **não** no `.env` do Mnemos.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Rotas**
+
+| Método | Rota | Quem |
+|--------|------|------|
+| `GET` / `PUT` | `/api/v1/ai-settings` | Admin — chave **mascarada** no GET |
+| `GET` | `/api/v1/internal/ai-settings` | Mnemos (`X-Api-Key`) — chave **completa** |
+
+</td>
+<td width="50%" valign="top">
+
+**Comportamento do `PUT`**
+
+| `apiKey` no body | Efeito |
+|------------------|--------|
+| *(omitido)* | Mantém a chave atual |
+| `""` (string vazia) | Limpa a chave |
+| valor novo | Substitui a chave |
+
+</td>
+</tr>
+</table>
+
+**Como o Mnemos consome as settings**
+
+| Momento | O que acontece |
+|---------|----------------|
+| **Startup** | Busca `/internal/ai-settings` (se Atlas estiver configurado) e sobrescreve o `.env` |
+| **Cada geração** | Aplica os campos multipart enviados pelo Atlas (**job-scoped**) |
+
+> Se `ATLAS_SYNC_ENABLED=true`, o Mnemos também pode **empurrar** `project` / `sections` / anexos de volta em `/api/v1/mnemos/*` (ver [Integração Mnemos](#-integração-mnemos-apiv1mnemos)), atribuindo tudo ao usuário que pediu a geração.
+
+---
 
 ### Observability (dashboard)
 
-Rotas JWT que proxyam o Mnemos para a tela de dashboard:
+Rotas JWT que **proxyam** o Mnemos para a tela de dashboard — o Atlas filtra pelo que o usuário pode ver.
 
-```text
-Front (dashboard)
-  → GET /api/v1/observability/executions?limit=20&operation=&provider=
-  → Atlas: AccessibleProjectIDs (filtra itens)
-  → GET {AI_SERVICE_URL}/v1/observability/executions?...
-
-Front (detalhe)
-  → GET /api/v1/observability/executions/:id
-  → GET {AI_SERVICE_URL}/v1/observability/executions/:id
-  → stages + documents + costs + errors
+```mermaid
+flowchart LR
+    F["🖥️ Front"] -->|lista| A["Atlas<br/>GET /observability/executions"]
+    A -->|AccessibleProjectIDs| M["Mnemos<br/>GET /v1/observability/executions"]
+    F -->|detalhe| A2["Atlas<br/>GET /observability/executions/:id"]
+    A2 --> M2["Mnemos<br/>GET /v1/observability/executions/:id"]
+    M2 --> D["stages · documents · costs · errors"]
 ```
 
-Filtros suportados na lista: `limit`, `operation` (`question_answering` | `document_processing`), `provider`, `project_id`, `status`, `model`.
+| Query (lista) | Valores / uso |
+|---------------|---------------|
+| `limit` | Quantidade de itens |
+| `operation` | `question_answering` \| `document_processing` |
+| `provider` | Provedor de IA |
+| `project_id` | Filtra por projeto |
+| `status` | Status da execução |
+| `model` | Modelo usado |
+
+---
 
 ### Busca semântica RAG
 
-`POST /api/v1/rag/search` — JWT obrigatório.
+`POST /api/v1/rag/search` — **JWT obrigatório**. O Atlas resolve as permissões e só então chama o Mnemos.
 
-O Atlas resolve as permissões e só então chama o Mnemos:
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Front as Front
+    participant Atlas as Atlas API
+    participant Mnemos as Mnemos
 
-```text
-Front (usuário logado)
-  → POST /api/v1/rag/search  { question, project_ids? }
-  → Atlas: AccessibleProjectIDs (+ interseção com project_ids)
-  → POST {AI_SERVICE_URL}/v1/rag/search  { question, project_ids }
-  → retorna answer + sources
+    Front->>Atlas: POST /rag/search { question, project_ids? }
+    Note over Atlas: AccessibleProjectIDs<br/>(+ interseção com project_ids)
+    Atlas->>Mnemos: POST /v1/rag/search { question, project_ids }
+    Mnemos-->>Atlas: answer + sources
+    Atlas-->>Front: answer + sources
 ```
 
-Após qualquer mudança de conhecimento (projeto, seção, lição, anexo, docs IA…), o Atlas notifica:
+> `project_ids` é **opcional**: se omitido, usa todos os projetos que o usuário pode ler.
 
-```text
-→ POST {AI_SERVICE_URL}/internal/sync/project  { "project_id" }
-→ Mnemos puxa GET /api/v1/internal/projects/{id}/knowledge e reconstrói o índice
-```
+**Sync do índice** — após qualquer mudança de conhecimento (projeto, seção, lição, anexo, docs IA…):
 
-Rotas internas (auth `X-Api-Key` / admin JWT):
+| Passo | Quem | Ação |
+|-------|------|------|
+| 1 | Atlas | `POST {AI_SERVICE_URL}/internal/sync/project` `{ "project_id" }` |
+| 2 | Mnemos | `GET /api/v1/internal/projects/{id}/knowledge` e reconstrói o índice |
 
-- `GET /api/v1/internal/projects?page=1` — IDs paginados (bootstrap)
-- `GET /api/v1/internal/projects/:id/knowledge` — corpus textual completo
+**Rotas internas** (auth `X-Api-Key` / admin JWT)
 
-`project_ids` no search é opcional no Atlas: se omitido, usa todos os projetos que o usuário pode ler.
+| Método | Rota | Uso |
+|--------|------|-----|
+| `GET` | `/api/v1/internal/projects?page=1` | IDs paginados (bootstrap) |
+| `GET` | `/api/v1/internal/projects/:id/knowledge` | Corpus textual completo |
+
+---
 
 ### Gerar documentação
 
 `POST /api/v1/projects/:slug/documentation/generate` — `multipart/form-data`
 
 | Campo | Obrigatório | Descrição |
-|-------|-------------|-----------|
+|-------|:-----------:|-----------|
 | `files` | sim | Um ou mais arquivos fonte |
 | `project_name` | não | Sobrescreve o nome enviado à IA |
 | `description` | não | Sobrescreve a descrição |
 | `generation_options` | não | JSON livre de opções |
 
-Resposta imediata (job assíncrono):
+**Resposta imediata** (job assíncrono):
 
 ```json
 {
@@ -386,9 +450,12 @@ Resposta imediata (job assíncrono):
 }
 ```
 
-Acompanhe com `GET /api/v1/documentation/jobs/:jobId` ou liste ativos em `GET /api/v1/documentation/jobs`.
+| Acompanhar | Rota |
+|------------|------|
+| Job específico | `GET /api/v1/documentation/jobs/:jobId` |
+| Jobs ativos | `GET /api/v1/documentation/jobs` |
 
-Enquanto o Mnemos processa, o job Atlas fica em `status: PROCESSING` e o estágio fino vai em **`current_step`** (código Mnemos) + **`message`** (rótulo em PT):
+Enquanto o Mnemos processa, o job Atlas fica em `status: PROCESSING`. O estágio fino vai em **`current_step`** (código Mnemos) + **`message`** (rótulo em PT):
 
 | `current_step` | `message` |
 |----------------|-----------|
@@ -402,7 +469,7 @@ Enquanto o Mnemos processa, o job Atlas fica em `status: PROCESSING` e o estági
 | `BUILDING_PROMPT` | Montando prompts |
 | `GENERATING` | Gerando documentação |
 | `VALIDATING_RESPONSE` | Validando / sincronizando |
-| `COMPLETED` / `FAILED` | (terminal no Mnemos; Atlas finaliza em seguida) |
+| `COMPLETED` / `FAILED` | Terminal no Mnemos; Atlas finaliza em seguida |
 
 Exemplo durante chunks:
 
@@ -416,7 +483,7 @@ Exemplo durante chunks:
 }
 ```
 
-O front pode mapear por `current_step` ou exibir `message` direto.
+> O front pode mapear por `current_step` ou exibir `message` direto.
 
 ---
 
@@ -424,27 +491,41 @@ O front pode mapear por `current_step` ou exibir `message` direto.
 
 Rotas para o Mnemos (ou automação) **criar/atualizar projetos**, aplicar a árvore de seções no formato do `DocumentResult` e anexar arquivos.
 
+> O front **não precisa** chamar `/mnemos/*` se usar só `documentation/generate`. No fluxo Atlas → Mnemos → Atlas, a Atlas já envia `responsible_user_id` / `requested_by` = `created_by` do job; o Mnemos devolve nos syncs.
+
 ### Autenticação
 
-| Modo | Como |
-|------|------|
-| Integração | Header `X-Api-Key: <MNEMOS_API_KEY>` |
-| Admin manual | `Authorization: Bearer <JWT_admin>` |
+| Modo | Header | Quando usar |
+|------|--------|-------------|
+| Integração | `X-Api-Key: <MNEMOS_API_KEY>` | Sync automático Mnemos → Atlas |
+| Admin manual | `Authorization: Bearer <JWT_admin>` | Testes / operação manual |
 
-Com `X-Api-Key`, informe quem pediu no front:
+Com `X-Api-Key`, informe **quem pediu no front** (vira responsável do projeto, `uploaded_by` e ator da auditoria):
 
-- body/form: `responsibleUserId` (UUID do usuário Atlas), **ou**
-- header: `X-Actor-User-Id: <uuid>`
+| Onde | Campo |
+|------|-------|
+| Body / form | `responsibleUserId` (UUID do usuário Atlas) |
+| Header | `X-Actor-User-Id: <uuid>` |
 
-Esse usuário vira responsável do projeto, `uploaded_by` dos arquivos e ator da auditoria.
-
-No fluxo Atlas → Mnemos → Atlas, a Atlas já envia `responsible_user_id` / `requested_by` = `created_by` do job; o Mnemos devolve nos syncs. O front **não precisa** chamar `/mnemos/*` se usar só `documentation/generate`.
+---
 
 ### Rotas
 
-#### `POST /api/v1/mnemos/projects`
+<table>
+<tr>
+<td width="28%" valign="top">
 
-Cria (201) ou atualiza (200) projeto + seções (payload alinhado ao Mnemos).
+| Método | Rota | Efeito |
+|--------|------|--------|
+| `POST` | `/mnemos/projects` | Cria **201** ou atualiza **200** + seções |
+| `PATCH` | `/mnemos/projects/:slug` | Só metadados (sem seções) |
+| `PUT` | `/mnemos/projects/:slug/structure` | Só árvore `sections[]` |
+| `POST` | `/mnemos/projects/:slug/attachments` | Upload multipart |
+
+</td>
+<td width="72%" valign="top">
+
+#### `POST /api/v1/mnemos/projects`
 
 ```json
 {
@@ -470,6 +551,10 @@ Cria (201) ou atualiza (200) projeto + seções (payload alinhado ao Mnemos).
 }
 ```
 
+</td>
+</tr>
+</table>
+
 | Campo seções | Significado |
 |--------------|-------------|
 | `temp_id` | ID estável no JSON (antes do UUID do banco) |
@@ -480,15 +565,17 @@ Cria (201) ou atualiza (200) projeto + seções (payload alinhado ao Mnemos).
 
 #### `PATCH /api/v1/mnemos/projects/:slug`
 
-Atualiza metadados (`name`, `description`, `status`, `client`, `responsibleUserId`) sem mexer nas seções.
+Atualiza metadados (`name`, `description`, `status`, `client`, `responsibleUserId`) **sem mexer nas seções**.
 
 #### `PUT /api/v1/mnemos/projects/:slug/structure`
 
-Aplica/substitui só a árvore `sections[]` (mesmo formato acima).
+Aplica/substitui só a árvore `sections[]` (mesmo formato do POST acima).
 
 #### `POST /api/v1/mnemos/projects/:slug/attachments`
 
-Multipart: campo `files` (ou `file`) + opcional `meta` (JSON com `attachments[]` do Mnemos) + `responsibleUserId`.
+Multipart: `files` (ou `file`) + opcional `meta` (JSON com `attachments[]` do Mnemos) + `responsibleUserId`.
+
+`kind` do anexo: `project` \| `dev`.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/mnemos/projects/meu-sistema/attachments \
@@ -498,11 +585,11 @@ curl -X POST http://localhost:8080/api/v1/mnemos/projects/meu-sistema/attachment
   -F 'meta=[{"source_filename":"spec.pdf","display_name":"Especificação","kind":"project"}]'
 ```
 
-`kind` do anexo: `project` | `dev`.
+---
 
 ### Configuração no Mnemos (serviço de IA)
 
-No `.env` do Mnemos (exemplo):
+No `.env` do Mnemos — a chave deve ser **igual** a `MNEMOS_API_KEY` na Atlas:
 
 ```env
 ATLAS_BASE_URL=http://localhost:8080
@@ -510,8 +597,6 @@ ATLAS_API_KEY=mesma-chave-de-MNEMOS_API_KEY
 ATLAS_SYNC_ENABLED=true
 ATLAS_REPLACE_SECTIONS=true
 ```
-
-A chave deve ser **igual** a `MNEMOS_API_KEY` na Atlas.
 
 ---
 
@@ -591,17 +676,23 @@ go run ./cmd/create-admin -email seu@email.com -password SUA_SENHA
 
 **Documentação com IA (Mnemos)**
 
-- Cliente HTTP em `internal/ai` → `POST /v1/knowledge/document` + polling `GET /v1/jobs/:id`.
-- Jobs e versões: migration `000006` (`documentation_jobs`, `documentation_versions`, `documentation_files`).
-- Rotas de geração, listagem de versões, cancelamento de jobs.
-- Atlas envia `responsible_user_id` / `requested_by` = usuário que disparou a geração.
+| Item | Detalhe |
+|------|---------|
+| Cliente | `internal/ai` → `POST /v1/knowledge/document` + polling `GET /v1/jobs/:id` |
+| Persistência | Migration `000006` — `documentation_jobs`, `documentation_versions`, `documentation_files` |
+| Provedor | Migration `000007` — `ai_settings` + rotas `/ai-settings` e `/internal/ai-settings` |
+| Rotas | Geração, listagem de versões, cancelamento de jobs |
+| Ator | `responsible_user_id` / `requested_by` = usuário que disparou a geração |
+| Credenciais | `ai_provider` / `ai_model` / `ai_api_key` / `ai_base_url` a partir de `ai_settings` |
 
 **Integração de volta (`/api/v1/mnemos/*`)**
 
-- Upsert de projeto + árvore de seções (`temp_id` / `parent_temp_id`, `kind` doc|dev).
-- Upload de anexos com meta no formato Mnemos (`source_filename`, `kind` project|dev).
-- Auth: `X-Api-Key` (`MNEMOS_API_KEY`) ou JWT admin.
-- Ator/responsável = usuário do front (`responsibleUserId` / `X-Actor-User-Id`), não o admin da chave.
+| Item | Detalhe |
+|------|---------|
+| Upsert | Projeto + árvore (`temp_id` / `parent_temp_id`, `kind` doc\|dev) |
+| Anexos | Meta no formato Mnemos (`source_filename`, `kind` project\|dev) |
+| Auth | `X-Api-Key` (`MNEMOS_API_KEY`) ou JWT admin |
+| Responsável | Usuário do front (`responsibleUserId` / `X-Actor-User-Id`), **não** o admin da chave |
 
 **Projetos / busca / dashboard**
 
@@ -610,19 +701,22 @@ go run ./cmd/create-admin -email seu@email.com -password SUA_SENHA
 
 ### Migrations desta etapa
 
-| # | Migration | Conteúdo |
-|---|-----------|----------|
+| # | Arquivo | Conteúdo |
+|---|---------|----------|
 | `000002` | `roles_and_dev` | Perfis, `section_kind`, dev-responsáveis |
 | `000003` | `dev_attachments` | `attachment_kind` para anexos por aba |
 | `000004` | `project_status_cancelled` | Status `cancelled` |
 | `000005` | `project_statuses_table` | Tabela `project_statuses` |
 | `000006` | `documentation_generation` | Jobs, versões e arquivos de documentação IA |
+| `000007` | `ai_settings` | Provider, model, api_key e base_url do provedor de IA |
 
 ### Próximos passos
 
-- Ajustes finos de UX no gerador de documentação no front.
-- Tabela de citações (`citations`) quando o contrato Atlas/Mnemos evoluir.
-- Feedback de sync (`atlas_sync`) na UI de jobs.
+| Prioridade | Item |
+|:----------:|------|
+| 1 | Ajustes finos de UX no gerador de documentação no front |
+| 2 | Tabela de citações (`citations`) quando o contrato Atlas/Mnemos evoluir |
+| 3 | Feedback de sync (`atlas_sync`) na UI de jobs |
 
 ---
 
