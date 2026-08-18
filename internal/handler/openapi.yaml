@@ -122,6 +122,92 @@ paths:
       responses:
         '200':
           description: Lista de usuários
+    post:
+      tags: [users]
+      summary: Criar usuário
+      description: Apenas administradores.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                role: { type: string, enum: [admin, consultor, desenvolvedor] }
+      responses:
+        '201':
+          description: Usuário criado
+        '403':
+          description: Sem permissão
+        '409':
+          description: E-mail já em uso
+
+  /api/v1/users/{id}:
+    get:
+      tags: [users]
+      summary: Obter usuário por id
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Usuário
+        '404':
+          description: Usuário não encontrado
+    patch:
+      tags: [users]
+      summary: Atualizar usuário
+      description: Apenas administradores. Senha é opcional.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, role]
+              properties:
+                name: { type: string }
+                email: { type: string, format: email }
+                role: { type: string, enum: [admin, consultor, desenvolvedor] }
+                password: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Usuário atualizado
+        '404':
+          description: Usuário não encontrado
+    delete:
+      tags: [users]
+      summary: Excluir usuário
+      description: Soft delete (is_active=false). Apenas administradores.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: Usuário excluído
+        '404':
+          description: Usuário não encontrado
 
   /api/v1/ai-settings:
     get:
@@ -402,7 +488,7 @@ paths:
           description: Lista resumida de projetos
     post:
       tags: [projects]
-      summary: Criar projeto (admin)
+      summary: Criar projeto
       security:
         - bearerAuth: []
       requestBody:

@@ -112,7 +112,7 @@ func (s *SearchService) Search(ctx context.Context, user domain.User, query stri
 		resp.Sections = append(resp.Sections, SearchResultItem{
 			ID: p.ID + "-section-" + sec.ID, Type: "section", Title: sec.Title,
 			Snippet: truncate(sec.Content, 200), Meta: "Seção de documentação",
-			Href: fmt.Sprintf("/projects/%s?section=%s", p.Slug, sec.ID),
+			Href:        fmt.Sprintf("/projects/%s?section=%s", p.Slug, sec.ID),
 			ProjectSlug: p.Slug, ProjectName: p.Name,
 		})
 	}
@@ -124,9 +124,9 @@ func (s *SearchService) Search(ctx context.Context, user domain.User, query stri
 		}
 		resp.Lessons = append(resp.Lessons, SearchResultItem{
 			ID: p.ID + "-lesson-" + lesson.ID, Type: "lesson", Title: lesson.Title,
-			Snippet: truncate(lesson.Description+" "+lesson.Recommendation, 200),
-			Meta: "Lição aprendida",
-			Href: "/projects/" + p.Slug + "?tab=lessons",
+			Snippet:     truncate(lesson.Description+" "+lesson.Recommendation, 200),
+			Meta:        "Lição aprendida",
+			Href:        "/projects/" + p.Slug + "?tab=lessons",
 			ProjectSlug: p.Slug, ProjectName: p.Name,
 		})
 	}
@@ -138,9 +138,9 @@ func (s *SearchService) Search(ctx context.Context, user domain.User, query stri
 		}
 		resp.Updates = append(resp.Updates, SearchResultItem{
 			ID: p.ID + "-update-" + ev.ID, Type: "update", Title: ev.Action,
-			Snippet: "Atualização em " + ev.Target + ".",
-			Meta: formatDate(ev.CreatedAt),
-			Href: "/projects/" + p.Slug + "?tab=history",
+			Snippet:     "Atualização em " + ev.Target + ".",
+			Meta:        formatDate(ev.CreatedAt),
+			Href:        "/projects/" + p.Slug + "?tab=history",
 			ProjectSlug: p.Slug, ProjectName: p.Name,
 		})
 	}
@@ -178,12 +178,12 @@ func NewDashboardService(
 }
 
 type DashboardSummary struct {
-	ProjectCount       int                     `json:"projectCount"`
-	ActiveProjectCount int                     `json:"activeProjectCount"`
-	DocumentCount      int                     `json:"documentCount"`
-	LessonCount        int                     `json:"lessonCount"`
-	UpdateCount        int                     `json:"updateCount"`
-	RecentUpdates      []DashboardUpdateItem   `json:"recentUpdates"`
+	ProjectCount       int                      `json:"projectCount"`
+	ActiveProjectCount int                      `json:"activeProjectCount"`
+	DocumentCount      int                      `json:"documentCount"`
+	LessonCount        int                      `json:"lessonCount"`
+	UpdateCount        int                      `json:"updateCount"`
+	RecentUpdates      []DashboardUpdateItem    `json:"recentUpdates"`
 	RecentProjects     []mapper.ProjectListItem `json:"recentProjects"`
 }
 
@@ -248,18 +248,20 @@ func (s *DashboardService) Summary(ctx context.Context, user domain.User, period
 	}
 
 	updates := make([]DashboardUpdateItem, 0, len(events))
+	authorIDs := make([]string, 0, len(events))
+	for _, ev := range events {
+		if ev.ActorUserID != nil {
+			authorIDs = append(authorIDs, *ev.ActorUserID)
+		}
+	}
+	authorNames, _ := s.users.GetNamesByIDs(ctx, authorIDs)
+
 	for _, ev := range events {
 		p, _ := s.projects.GetByID(ctx, ev.ProjectID)
-		author := "Sistema"
-		if ev.ActorUserID != nil {
-			u, _ := s.users.GetByID(ctx, *ev.ActorUserID)
-			if u != nil {
-				author = u.Name
-			}
-		}
 		item := DashboardUpdateItem{
 			ID: ev.ID, At: formatDate(ev.CreatedAt),
-			Author: author, Action: ev.Action, Target: ev.Target,
+			Author: mapper.ResolveAuthor(ev.Action, ev.ActorUserID, authorNames),
+			Action: ev.Action, Target: ev.Target,
 		}
 		if p != nil {
 			item.ProjectSlug = p.Slug

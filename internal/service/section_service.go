@@ -157,6 +157,12 @@ func (s *SectionService) Reorder(ctx context.Context, user domain.User, slug str
 	if err := s.sections.Reorder(ctx, project.ID, kind, items); err != nil {
 		return err
 	}
+	actorID := user.ID
+	_ = s.audit.Create(ctx, nil, &domain.AuditEvent{
+		ProjectID: project.ID, ActorUserID: &actorID,
+		Action: "Reordenou", Target: "seções",
+		EntityType: strPtr(auditEntityType(kind)), EntityID: strPtr(project.ID),
+	})
 	notifyMnemos(s.sync, project.ID)
 	return nil
 }

@@ -16,6 +16,7 @@ type ProjectResponse struct {
 	Description       string               `json:"description"`
 	Status            string               `json:"status"`
 	Responsible       string               `json:"responsible"`
+	ResponsibleUserID string               `json:"responsibleUserId,omitempty"`
 	Readers           []string             `json:"readers,omitempty"`
 	Client            *string              `json:"client,omitempty"`
 	CreatedAt         string               `json:"createdAt"`
@@ -33,18 +34,19 @@ type ProjectResponse struct {
 }
 
 type ProjectListItem struct {
-	ID          string   `json:"id"`
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Status      string   `json:"status"`
-	Responsible string   `json:"responsible"`
-	Readers     []string `json:"readers,omitempty"`
-	Client      *string  `json:"client,omitempty"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   string   `json:"updatedAt"`
-	Tags        []string `json:"tags"`
-	Tech        []string `json:"tech,omitempty"`
+	ID                string   `json:"id"`
+	Slug              string   `json:"slug"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	Status            string   `json:"status"`
+	Responsible       string   `json:"responsible"`
+	ResponsibleUserID string   `json:"responsibleUserId,omitempty"`
+	Readers           []string `json:"readers,omitempty"`
+	Client            *string  `json:"client,omitempty"`
+	CreatedAt         string   `json:"createdAt"`
+	UpdatedAt         string   `json:"updatedAt"`
+	Tags              []string `json:"tags"`
+	Tech              []string `json:"tech,omitempty"`
 }
 
 type ProjectStatusResponse struct {
@@ -147,14 +149,8 @@ func ToProjectResponse(in ProjectBuildInput) ProjectResponse {
 
 	history := make([]HistoryResponse, 0, len(in.History))
 	for _, h := range in.History {
-		author := "Sistema"
-		if h.ActorUserID != nil {
-			if name, ok := in.AuthorNames[*h.ActorUserID]; ok {
-				author = name
-			}
-		}
 		history = append(history, HistoryResponse{
-			ID: h.ID, At: FormatDate(h.CreatedAt), Author: author,
+			ID: h.ID, At: FormatDate(h.CreatedAt), Author: ResolveAuthor(h.Action, h.ActorUserID, in.AuthorNames),
 			Action: h.Action, Target: h.Target,
 		})
 	}
@@ -167,7 +163,7 @@ func ToProjectResponse(in ProjectBuildInput) ProjectResponse {
 	return ProjectResponse{
 		ID: in.Project.ID, Slug: in.Project.Slug, Name: in.Project.Name,
 		Description: in.Project.Description, Status: string(in.Project.Status),
-		Responsible: in.Responsible, Readers: in.ReaderNames, Client: in.Project.Client,
+		Responsible: in.Responsible, ResponsibleUserID: in.Project.ResponsibleUserID, Readers: in.ReaderNames, Client: in.Project.Client,
 		CreatedAt: FormatDate(in.Project.CreatedAt), UpdatedAt: FormatDate(in.Project.UpdatedAt),
 		Tags: in.Tags, Tech: in.Tech,
 		DevResponsibles: devResponsibles, DevResponsibleIds: in.DevResponsibleIDs,
@@ -181,7 +177,7 @@ func ToProjectResponse(in ProjectBuildInput) ProjectResponse {
 func ToProjectListItem(p domain.Project, responsible string, readers, tags, tech []string) ProjectListItem {
 	return ProjectListItem{
 		ID: p.ID, Slug: p.Slug, Name: p.Name, Description: p.Description,
-		Status: string(p.Status), Responsible: responsible, Readers: readers,
+		Status: string(p.Status), Responsible: responsible, ResponsibleUserID: p.ResponsibleUserID, Readers: readers,
 		Client: p.Client, CreatedAt: FormatDate(p.CreatedAt), UpdatedAt: FormatDate(p.UpdatedAt),
 		Tags: tags, Tech: tech,
 	}
@@ -193,6 +189,18 @@ func FormatDate(t time.Time) string {
 		return t.UTC().Format("2006-01-02")
 	}
 	return t.In(loc).Format("2006-01-02")
+}
+
+func ResolveAuthor(action string, actorUserID *string, names map[string]string) string {
+	if actorUserID != nil && names != nil {
+		if name := strings.TrimSpace(names[*actorUserID]); name != "" {
+			return name
+		}
+	}
+	if strings.Contains(action, "Mnemos") {
+		return "Mnemos"
+	}
+	return "Sistema"
 }
 
 func HumanSize(bytes int64) string {

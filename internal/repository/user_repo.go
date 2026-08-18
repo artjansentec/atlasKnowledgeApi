@@ -77,6 +77,49 @@ func (r *UserRepository) Create(ctx context.Context, tx pgx.Tx, u *domain.User) 
 	`, u.Email, u.PasswordHash, u.Name, u.Role, u.IsActive).Scan(&u.ID, &u.CreatedAt, &u.UpdatedAt)
 }
 
+func (r *UserRepository) Insert(ctx context.Context, u *domain.User) error {
+	return r.db.Pool.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash, name, role, is_active)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, created_at, updated_at
+	`, u.Email, u.PasswordHash, u.Name, u.Role, u.IsActive).Scan(&u.ID, &u.CreatedAt, &u.UpdatedAt)
+}
+
+func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
+	err := r.db.Pool.QueryRow(ctx, `
+		UPDATE users
+		SET name = $2, email = $3, role = $4, password_hash = $5, updated_at = NOW()
+		WHERE id = $1 AND is_active = TRUE
+		RETURNING updated_at
+	`, u.ID, u.Name, u.Email, u.Role, u.PasswordHash).Scan(&u.UpdatedAt)
+	if err == pgx.ErrNoRows {
+		return fmt.Errorf("user not found")
+	}
+	return err
+}
+
+func (r *UserRepository) Deactivate(ctx context.Context, id string) (bool, error) {
+	tag, err := r.db.Pool.Exec(ctx, `
+		UPDATE users SET is_active = FALSE, updated_at = NOW()
+		WHERE id = $1 AND is_active = TRUE
+	`, id)
+	if err != nil {
+		return false, fmt.Errorf("deactivate user: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (r *UserRepository) CountActiveAdmins(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = TRUE
+	`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count active admins: %w", err)
+	}
+	return count, nil
+}
+
 func (r *UserRepository) GetNamesByIDs(ctx context.Context, ids []string) (map[string]string, error) {
 	result := make(map[string]string)
 	if len(ids) == 0 {

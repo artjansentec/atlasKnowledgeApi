@@ -143,20 +143,10 @@ func (s *ProjectService) requireRead(ctx context.Context, user domain.User, proj
 	if err != nil {
 		return nil, httperr.Internal("falha ao carregar membros")
 	}
-	if CanReadProject(user, *project, members) {
-		return members, nil
+	if !CanReadProject(user, *project, members) {
+		return nil, httperr.Forbidden("sem permissão para acessar este projeto")
 	}
-	// Dev-responsáveis também têm acesso de leitura ao projeto (aba Desenvolvimento).
-	devIDs, err := s.db.ListDevResponsibleIDs(ctx, project.ID)
-	if err != nil {
-		return nil, httperr.Internal("falha ao carregar dev-responsáveis")
-	}
-	for _, id := range devIDs {
-		if id == user.ID {
-			return members, nil
-		}
-	}
-	return nil, httperr.Forbidden("sem permissão para acessar este projeto")
+	return members, nil
 }
 
 func (s *ProjectService) requireManage(ctx context.Context, user domain.User, project *domain.Project) error {
@@ -218,11 +208,11 @@ func (s *ProjectService) List(ctx context.Context, user domain.User, filter doma
 }
 
 func (s *ProjectService) Create(ctx context.Context, user domain.User, input CreateProjectInput) (*domain.Project, error) {
-	if !IsAdmin(user) {
-		return nil, httperr.Forbidden("apenas administradores podem criar projetos")
-	}
 	if strings.TrimSpace(input.Name) == "" {
 		return nil, httperr.Validation("nome é obrigatório")
+	}
+	if strings.TrimSpace(input.ResponsibleUserID) == "" {
+		input.ResponsibleUserID = user.ID
 	}
 
 	explicitSlug := strings.TrimSpace(input.Slug) != ""
@@ -444,6 +434,12 @@ func (s *ProjectService) Delete(ctx context.Context, user domain.User, slug stri
 	if err != nil || project == nil {
 		return httperr.NotFound("projeto não encontrado")
 	}
+	actorID := user.ID
+	_ = s.audit.Create(ctx, nil, &domain.AuditEvent{
+		ProjectID: project.ID, ActorUserID: &actorID,
+		Action: "Removeu o projeto", Target: project.Name,
+		EntityType: strPtr("project"), EntityID: strPtr(project.ID),
+	})
 	if err := s.db.SoftDelete(ctx, project.ID); err != nil {
 		return err
 	}
@@ -459,7 +455,16 @@ func (s *ProjectService) SetReaders(ctx context.Context, user domain.User, slug 
 	if err := s.requireManage(ctx, user, project); err != nil {
 		return err
 	}
-	return s.db.ReplaceReaders(ctx, project.ID, userIDs)
+	if err := s.db.ReplaceReaders(ctx, project.ID, userIDs); err != nil {
+		return err
+	}
+	actorID := user.ID
+	_ = s.audit.Create(ctx, nil, &domain.AuditEvent{
+		ProjectID: project.ID, ActorUserID: &actorID,
+		Action: "Atualizou leitores", Target: project.Name,
+		EntityType: strPtr("project"), EntityID: strPtr(project.ID),
+	})
+	return nil
 }
 
 func (s *ProjectService) ListMembers(ctx context.Context, projectID string) ([]domain.ProjectMember, error) {

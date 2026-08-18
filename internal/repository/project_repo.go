@@ -335,30 +335,8 @@ func (r *ProjectRepository) SetDevResponsibles(ctx context.Context, tx pgx.Tx, p
 	return nil
 }
 
-func (r *ProjectRepository) AccessibleProjectIDs(ctx context.Context, userID string, isAdmin bool) ([]string, error) {
-	if isAdmin {
-		return nil, nil // nil means all
-	}
-	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id FROM projects WHERE deleted_at IS NULL AND (
-			responsible_user_id = $1
-			OR id IN (SELECT project_id FROM project_members WHERE user_id = $1)
-			OR id IN (SELECT project_id FROM project_dev_responsibles WHERE user_id = $1)
-		)
-	`, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
+func (r *ProjectRepository) AccessibleProjectIDs(ctx context.Context, _ string, _ bool) ([]string, error) {
+	return nil, nil
 }
 
 // ListIDs returns a page of active project IDs for Mnemos bootstrap.

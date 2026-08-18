@@ -53,18 +53,27 @@ func setupTestEnv(t *testing.T) (*echo.Echo, *db.DB, func()) {
 	authSvc := service.NewAuthService(cfg, userRepo, refreshRepo)
 	projectSvc := service.NewProjectService(projectRepo, sectionRepo, lessonRepo, attachmentRepo, fileRepo, tagRepo, auditRepo, userRepo, database.Pool)
 	sectionSvc := service.NewSectionService(projectRepo, sectionRepo, auditRepo)
+	userSvc := service.NewUserService(userRepo, refreshRepo)
 	authMW := middleware.NewAuthMiddleware(authSvc, cfg)
 
 	authHandler := handler.NewAuthHandler(cfg, authSvc)
 	projectHandler := handler.NewProjectHandler(cfg, projectSvc, userRepo, tagRepo, fileRepo)
 	sectionHandler := handler.NewSectionHandler(sectionSvc)
+	userHandler := handler.NewUserHandler(userSvc)
 
 	e := echo.New()
 	api := e.Group("/api/v1")
 	api.POST("/auth/login", authHandler.Login)
 	protected := api.Group("", authMW.RequireAuth)
+	protected.GET("/users", userHandler.List)
+	protected.GET("/users/:id", userHandler.Get)
+	protected.POST("/users", userHandler.Create)
+	protected.PATCH("/users/:id", userHandler.Patch)
+	protected.DELETE("/users/:id", userHandler.Delete)
 	protected.GET("/projects", projectHandler.List)
+	protected.GET("/projects/:slug", projectHandler.Get)
 	protected.POST("/projects", projectHandler.Create)
+	protected.PATCH("/projects/:slug", projectHandler.Patch)
 	protected.PATCH("/projects/:slug/sections/:sectionId", sectionHandler.Patch)
 	protected.PUT("/projects/:slug/sections/reorder", sectionHandler.Reorder)
 
@@ -131,6 +140,30 @@ func login(t *testing.T, e *echo.Echo, email, password string) string {
 	return resp.AccessToken
 }
 
+func TestReaderCanGetProjectButCannotPatch(t *testing.T) {
+	e, _, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	token := login(t, e, "reader@test.com", "user123")
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/projects/test-project", nil)
+	getReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	getRec := httptest.NewRecorder()
+	e.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("leitura: esperado 200, obteve %d: %s", getRec.Code, getRec.Body.String())
+	}
+
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/v1/projects/test-project", bytes.NewBufferString(`{"name":"Hack"}`))
+	patchReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	patchReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	patchRec := httptest.NewRecorder()
+	e.ServeHTTP(patchRec, patchReq)
+	if patchRec.Code != http.StatusForbidden {
+		t.Fatalf("edição: esperado 403, obteve %d: %s", patchRec.Code, patchRec.Body.String())
+	}
+}
+
 func TestLoginValid(t *testing.T) {
 	e, _, cleanup := setupTestEnv(t)
 	defer cleanup()
@@ -153,18 +186,24 @@ func TestLoginInvalid(t *testing.T) {
 	}
 }
 
-func TestUserCannotCreateProject(t *testing.T) {
-	e, _, cleanup := setupTestEnv(t)
+func TestAnyUserCanCreateProject(t *testing.T) {
+	e, database, cleanup := setupTestEnv(t)
 	defer cleanup()
+
+	var readerID string
+	if err := database.Pool.QueryRow(context.Background(), `SELECT id FROM users WHERE email = 'reader@test.com'`).Scan(&readerID); err != nil {
+		t.Fatal(err)
+	}
+
 	token := login(t, e, "reader@test.com", "user123")
-	body := bytes.NewBufferString(`{"name":"Novo","description":"d","responsibleUserId":"00000000-0000-0000-0000-000000000001"}`)
+	body := bytes.NewBufferString(`{"name":"Novo","description":"d","responsibleUserId":"` + readerID + `"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/projects", body)
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("esperado 403, obteve %d", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("esperado 201, obteve %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -193,6 +232,70 @@ func TestResponsibleCanPatchSectionReaderCannot(t *testing.T) {
 	e.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusForbidden {
 		t.Fatalf("leitor: esperado 403, obteve %d", rec2.Code)
+	}
+}
+
+func TestAdminCanGetAndManageUsers(t *testing.T) {
+	e, database, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	token := login(t, e, "admin@test.com", "admin123")
+
+	var readerID string
+	if err := database.Pool.QueryRow(context.Background(), `SELECT id FROM users WHERE email = 'reader@test.com'`).Scan(&readerID); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/"+readerID, nil)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET usuário: esperado 200, obteve %d: %s", rec.Code, rec.Body.String())
+	}
+
+	createBody := bytes.NewBufferString(`{"name":"Novo Dev","email":"dev@test.com","password":"senha1234","role":"desenvolvedor"}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/users", createBody)
+	createReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	createReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	createRec := httptest.NewRecorder()
+	e.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST usuário: esperado 201, obteve %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(createRec.Body.Bytes(), &created)
+	if created.ID == "" {
+		t.Fatalf("POST usuário não devolveu id: %s", createRec.Body.String())
+	}
+
+	patchBody := bytes.NewBufferString(`{"name":"Dev Atualizado","email":"dev@test.com","role":"consultor"}`)
+	patchReq := httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+created.ID, patchBody)
+	patchReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	patchReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	patchRec := httptest.NewRecorder()
+	e.ServeHTTP(patchRec, patchReq)
+	if patchRec.Code != http.StatusOK {
+		t.Fatalf("PATCH usuário: esperado 200, obteve %d: %s", patchRec.Code, patchRec.Body.String())
+	}
+}
+
+func TestReaderCannotCreateUser(t *testing.T) {
+	e, _, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	token := login(t, e, "reader@test.com", "user123")
+	body := bytes.NewBufferString(`{"name":"X","email":"x@test.com","password":"senha1234","role":"consultor"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/users", body)
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	req.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("esperado 403, obteve %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

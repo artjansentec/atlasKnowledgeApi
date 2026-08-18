@@ -71,19 +71,3 @@ func parseDashboardPeriod(fromStr, toStr string) (*domain.DateRange, error) {
 	}
 	return &period, nil
 }
-
-type UserHandler struct {
-	users *service.UserListService
-}
-
-func NewUserHandler(users *service.UserListService) *UserHandler {
-	return &UserHandler{users: users}
-}
-
-func (h *UserHandler) List(c echo.Context) error {
-	users, err := h.users.ListActive(c.Request().Context())
-	if err != nil {
-		return Error(c, err)
-	}
-	return JSON(c, http.StatusOK, users)
-}

@@ -164,7 +164,7 @@ func main() {
 	attachmentSvc := service.NewAttachmentService(cfg, projectRepo, attachmentRepo, fileRepo, auditRepo, fileStore, database.Pool)
 	searchSvc := service.NewSearchService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo)
 	dashboardSvc := service.NewDashboardService(projectRepo, sectionRepo, lessonRepo, auditRepo, userRepo, tagRepo)
-	userSvc := service.NewUserListService(userRepo)
+	userSvc := service.NewUserService(userRepo, refreshRepo)
 	aiSettingsSvc := service.NewAISettingsService(aiSettingsRepo)
 	documentationSvc := service.NewDocumentationService(
 		cfg, projectRepo, documentationRepo, fileRepo, userRepo, auditRepo, aiSettingsRepo, fileStore, aiClient, database.Pool,
@@ -229,6 +229,10 @@ func main() {
 
 	protected := api.Group("", authMW.RequireAuth)
 	protected.GET("/users", userHandler.List)
+	protected.GET("/users/:id", userHandler.Get)
+	protected.POST("/users", userHandler.Create)
+	protected.PATCH("/users/:id", userHandler.Patch)
+	protected.DELETE("/users/:id", userHandler.Delete)
 	protected.GET("/dashboard/summary", dashboardHandler.Summary)
 	protected.GET("/observability/executions", observabilityHandler.ListExecutions)
 	protected.GET("/observability/executions/:id", observabilityHandler.GetExecution)

@@ -6,16 +6,8 @@ func CanManageProject(user domain.User, project domain.Project) bool {
 	return user.Role == domain.RoleAdmin || project.ResponsibleUserID == user.ID
 }
 
-func CanReadProject(user domain.User, project domain.Project, members []domain.ProjectMember) bool {
-	if CanManageProject(user, project) {
-		return true
-	}
-	for _, m := range members {
-		if m.UserID == user.ID {
-			return true
-		}
-	}
-	return false
+func CanReadProject(user domain.User, _ domain.Project, _ []domain.ProjectMember) bool {
+	return user.ID != ""
 }
 
 func IsAdmin(user domain.User) bool {
