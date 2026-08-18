@@ -560,6 +560,12 @@ Enquanto o Mnemos processa, o job Atlas fica em `status: PROCESSING`. O estágio
 | `READING_CHUNKS` | Lendo em chunks |
 | `BUILDING_PROMPT` | Montando prompts |
 | `GENERATING` | Gerando documentação |
+| `ANALYZING_SPECIALISTS` | Analisando especialistas |
+| `COVERAGE` | Validando cobertura |
+| `SYNTHESIS` | Sintetizando documentação |
+| `ENRICHING` | Enriquecendo |
+| `POLISHING` | Polindo |
+| `FINAL_VALIDATION` | Validação final |
 | `VALIDATING_RESPONSE` | Validando / sincronizando |
 | `COMPLETED` / `FAILED` | Terminal no Mnemos; Atlas finaliza em seguida |
 

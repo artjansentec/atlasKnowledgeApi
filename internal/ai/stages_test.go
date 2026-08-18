@@ -19,6 +19,12 @@ func TestStageLabel(t *testing.T) {
 	if got := ai.StageLabel("READING_CHUNKS"); got != "Lendo em chunks" {
 		t.Fatalf("got %q", got)
 	}
+	if got := ai.StageLabel("ANALYZING_SPECIALISTS"); got != "Analisando especialistas" {
+		t.Fatalf("got %q", got)
+	}
+	if got := ai.StageLabel("SYNTHESIS"); got != "Sintetizando documentação" {
+		t.Fatalf("got %q", got)
+	}
 	if got := ai.StageLabel("UNKNOWN_X"); got != "UNKNOWN_X" {
 		t.Fatalf("unknown should pass through: %q", got)
 	}

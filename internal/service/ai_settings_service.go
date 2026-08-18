@@ -34,7 +34,7 @@ func (s *AISettingsService) Get(ctx context.Context) (*domain.AISettings, error)
 	if settings == nil {
 		return &domain.AISettings{
 			Provider: "openai",
-			Model:    "gpt-4o-mini",
+			Model:    "gpt-5.6-luna",
 		}, nil
 	}
 	return settings, nil

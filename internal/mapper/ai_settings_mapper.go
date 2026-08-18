@@ -30,7 +30,7 @@ func ToAISettingsPublic(s *domain.AISettings) AISettingsPublic {
 	if s == nil {
 		return AISettingsPublic{
 			Provider:  "openai",
-			Model:     "gpt-4o-mini",
+			Model:     "gpt-5.6-luna",
 			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
 		}
 	}
@@ -52,7 +52,7 @@ func ToAISettingsPublic(s *domain.AISettings) AISettingsPublic {
 
 func ToAISettingsInternal(s *domain.AISettings) AISettingsInternal {
 	if s == nil {
-		return AISettingsInternal{Provider: "openai", Model: "gpt-4o-mini"}
+		return AISettingsInternal{Provider: "openai", Model: "gpt-5.6-luna"}
 	}
 	return AISettingsInternal{
 		Provider: s.Provider,
