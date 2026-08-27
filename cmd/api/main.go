@@ -74,7 +74,7 @@ func printStartupBanner(cfg *config.Config) {
 		fmt.Sprintf("  %sAPI%s         %s%s/api/v1%s", bold, reset, cyan, base, reset),
 		fmt.Sprintf("  %sSwagger%s     %s%s/swagger%s", bold, reset, cyan, base, reset),
 		fmt.Sprintf("  %sHealth%s      %s%s/api/v1/health%s", bold, reset, cyan, base, reset),
-		fmt.Sprintf("  %sStorage%s     %s%s%s", bold, reset, dim, cfg.StoragePath, reset),
+		fmt.Sprintf("  %sStorage%s     %s%s%s", bold, reset, dim, cfg.StorageLabel(), reset),
 		fmt.Sprintf("  %sMnimos AI%s   %s%s%s", bold, reset, dim, aiGenerateURL, reset),
 		fmt.Sprintf("  %sMnimos Jobs%s %s%s%s", bold, reset, dim, aiJobsURL, reset),
 		fmt.Sprintf("  %sMnimos%s      %s  %s(%s)%s", bold, reset, aiStatusColored, dim, aiHealthURL, reset),
@@ -113,6 +113,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("❌ config: %v", err)
 	}
+	for _, warning := range cfg.StartupWarnings() {
+		log.Printf("⚠  %s", warning)
+	}
 
 	ctx := context.Background()
 	if err := db.MigrateUp(cfg.DatabaseURL); err != nil {
@@ -121,7 +124,7 @@ func main() {
 
 	database, err := db.Connect(ctx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("❌ banco de dados: %v\n   Verifique DATABASE_URL e se o Postgres local está rodando", err)
+		log.Fatalf("❌ banco de dados: %v\n   Verifique POSTGRES_HOST (EC2: RDS, host.docker.internal ou postgres) e se o banco está acessível", err)
 	}
 	defer database.Close()
 
@@ -137,7 +140,7 @@ func main() {
 		fmt.Printf("admin criado: %s (%s)\n", adminResult.Name, adminResult.Email)
 	}
 
-	fileStore, err := storage.NewLocalFileStorage(cfg.StoragePath)
+	fileStore, err := storage.New(ctx, cfg.StorageDriver, cfg.StoragePath, cfg.S3Bucket, cfg.S3Prefix, cfg.S3Region)
 	if err != nil {
 		log.Fatalf("❌ storage: %v", err)
 	}
@@ -209,6 +212,7 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 	e.HidePort = true
+	e.IPExtractor = echo.ExtractIPFromXFFHeader()
 	e.Use(echomw.Recover())
 	e.Use(echomw.RequestID())
 	e.Use(middleware.ColoredLogger())

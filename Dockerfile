@@ -19,15 +19,20 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata wget \
+RUN apk add --no-cache ca-certificates tzdata wget su-exec \
     && addgroup -S atlas \
     && adduser -S -G atlas atlas \
     && mkdir -p /data/storage \
     && chown -R atlas:atlas /data
 
 COPY --from=builder /out/api /usr/local/bin/api
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh
 
-USER atlas
+ENV STORAGE_PATH=/data/storage
+ENV TZ=America/Sao_Paulo
+ENV APP_ENV=production
 
 EXPOSE 8080
 
@@ -36,4 +41,5 @@ VOLUME ["/data/storage"]
 HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=5 \
     CMD wget -qO- http://127.0.0.1:8080/api/v1/health >/dev/null || exit 1
 
-ENTRYPOINT ["/usr/local/bin/api"]
+# Root só no entrypoint (chown do volume); a API sobe como atlas.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

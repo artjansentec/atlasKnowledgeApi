@@ -261,7 +261,7 @@ Nesse modo: `POSTGRES_HOST=postgres` (mesmo usuário/senha/banco do container). 
 | Logs | `make docker-logs` / `docker compose logs -f api` |
 | Parar | `make docker-down` / `docker compose down` |
 
-O Postgres interno é publicado em `localhost:5434`. Uploads ficam no volume `api_storage`.
+O Postgres interno é publicado em `localhost:5434`. Uploads: disco local (`api_storage`) **ou S3**. Para S3, associe uma IAM role à EC2 com `s3:CreateBucket`, `s3:HeadBucket`, `s3:GetObject`, `s3:PutObject` e `s3:DeleteObject` no bucket. No `.env` só `S3_BUCKET=nome-do-bucket` — se o bucket ainda não existir, a API cria na subida. Com a API no Docker, o IMDSv2 precisa de hop-limit 2 (`--http-put-response-hop-limit 2`) para a role ser visível dentro do container.
 
 Coloque um proxy (Nginx, Caddy, Traefik) na frente com HTTPS e aponte `CORS_ORIGINS` / `API_BASE_URL` para as URLs públicas.
 
@@ -312,7 +312,10 @@ Suba **primeiro** a Atlas (`docker compose up -d`) para criar a rede, depois o M
 | `JWT_SECRET` | Segredo HS256 (mín. 32 caracteres em produção) | `change-me-in-production` |
 | `JWT_ACCESS_TTL` | Expiração access token | `15m` |
 | `JWT_REFRESH_TTL` | Expiração refresh token | `168h` |
-| `STORAGE_PATH` | Pasta de uploads locais | `./storage` |
+| `STORAGE_PATH` | Pasta de uploads locais (ignorada se `S3_BUCKET` estiver definido) | `./storage` |
+| `S3_BUCKET` | Nome do bucket S3. Se preenchido, os uploads vão para o S3 via IAM role da EC2 | *(vazio = disco local)* |
+| `S3_PREFIX` | Prefixo opcional das chaves no bucket | *(vazio)* |
+| `AWS_REGION` | Região do bucket (na EC2 o SDK detecta sozinho) | IMDS / `us-east-1` |
 | `MAX_UPLOAD_BYTES` | Tamanho máximo upload | `20971520` (20 MB) |
 | `CORS_ORIGINS` | Origens permitidas (vírgula) | `http://localhost:5173` |
 | `COOKIE_SECURE` | Cookie de refresh só em HTTPS | `true` se `APP_ENV=production` |

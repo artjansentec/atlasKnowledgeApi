@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,10 @@ type Config struct {
 	JWTAccessTTL     time.Duration
 	JWTRefreshTTL    time.Duration
 	StoragePath      string
+	StorageDriver    string
+	S3Bucket         string
+	S3Prefix         string
+	S3Region         string
 	MaxUploadBytes   int64
 	CORSOrigins      []string
 	RefreshCookie    string
@@ -66,6 +71,10 @@ func Load() (*Config, error) {
 
 	port := getEnv("PORT", "8080")
 	appEnv := strings.ToLower(getEnv("APP_ENV", "development"))
+	// Docker na EC2 costuma herdar APP_ENV=development do .env local via env_file.
+	if runningInDocker() && !isProduction(appEnv) {
+		appEnv = "production"
+	}
 	jwtSecret := getEnv("JWT_SECRET", "change-me-in-production")
 	adminPassword := getEnv("ADMIN_PASSWORD", "CHANGE_ME")
 
@@ -73,8 +82,8 @@ func Load() (*Config, error) {
 		if len(jwtSecret) < 32 || jwtSecret == "change-me-in-production" || jwtSecret == "CHANGE_ME" {
 			return nil, fmt.Errorf("JWT_SECRET deve ter pelo menos 32 caracteres em produção")
 		}
-		if adminPassword == "" || adminPassword == "CHANGE_ME" {
-			return nil, fmt.Errorf("ADMIN_PASSWORD deve ser definido com um valor forte em produção")
+		if adminPassword == "" || adminPassword == "CHANGE_ME" || len(adminPassword) < 8 {
+			return nil, fmt.Errorf("ADMIN_PASSWORD deve ser definido com um valor forte em produção (mín. 8 caracteres)")
 		}
 	}
 
@@ -112,6 +121,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	storageDriver, s3Bucket, s3Prefix, s3Region, err := resolveStorageConfig()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Config{
 		AppEnv:           appEnv,
 		Port:             port,
@@ -122,14 +136,18 @@ func Load() (*Config, error) {
 		JWTSecret:        jwtSecret,
 		JWTAccessTTL:     accessTTL,
 		JWTRefreshTTL:    refreshTTL,
-		StoragePath:      getEnv("STORAGE_PATH", "./storage"),
+		StoragePath:      resolveStoragePath(),
+		StorageDriver:    storageDriver,
+		S3Bucket:         s3Bucket,
+		S3Prefix:         s3Prefix,
+		S3Region:         s3Region,
 		MaxUploadBytes:   maxUpload,
 		CORSOrigins:      origins,
 		RefreshCookie:    "refresh_token",
 		CookieSecure:     cookieSecure,
 		CookieSameSite:   cookieSameSite,
 		APIBaseURL:       getEnv("API_BASE_URL", fmt.Sprintf("http://localhost:%s", port)),
-		AIServiceURL:     getEnv("AI_SERVICE_URL", "http://localhost:8081"),
+		AIServiceURL:     resolveAIServiceURL(),
 		AIServiceTimeout: aiTimeout,
 		DocMaxFiles:      docMaxFiles,
 		DocMaxTotalBytes: docMaxTotal,
@@ -142,9 +160,42 @@ func (c *Config) ServerAddress() string {
 	return ":" + c.Port
 }
 
+func (c *Config) StorageLabel() string {
+	if strings.EqualFold(c.StorageDriver, "s3") {
+		if prefix := strings.Trim(c.S3Prefix, "/"); prefix != "" {
+			return "s3://" + c.S3Bucket + "/" + prefix
+		}
+		return "s3://" + c.S3Bucket
+	}
+	return c.StoragePath
+}
+
+// StartupWarnings lista valores de .env de desenvolvimento que quebram o front na EC2
+// (CORS, downloads) mas não impedem a API de subir.
+func (c *Config) StartupWarnings() []string {
+	if !runningInDocker() {
+		return nil
+	}
+	var warnings []string
+	if isLoopbackHost(hostnameFromURL(c.APIBaseURL)) {
+		warnings = append(warnings, "API_BASE_URL ainda é localhost — links de download de anexos vão apontar para o container. Defina a URL pública (https://api.suaempresa.com)")
+	}
+	onlyLocalCORS := len(c.CORSOrigins) > 0
+	for _, origin := range c.CORSOrigins {
+		if origin == "*" || (!strings.Contains(origin, "localhost") && !strings.Contains(origin, "127.0.0.1")) {
+			onlyLocalCORS = false
+			break
+		}
+	}
+	if onlyLocalCORS {
+		warnings = append(warnings, "CORS_ORIGINS só tem localhost — o front em produção será bloqueado pelo navegador. Use a origem HTTPS do front")
+	}
+	return warnings
+}
+
 func resolveDatabaseURL() (string, error) {
 	if raw := strings.TrimSpace(os.Getenv("DATABASE_URL")); raw != "" {
-		return raw, nil
+		return normalizeDatabaseURL(raw)
 	}
 
 	user := getEnv("POSTGRES_USER", "postgres")
@@ -156,6 +207,12 @@ func resolveDatabaseURL() (string, error) {
 
 	if host == "" {
 		return "", fmt.Errorf("POSTGRES_HOST vazio — informe o host do banco ou DATABASE_URL")
+	}
+	if err := rejectDockerLoopback("POSTGRES_HOST", host); err != nil {
+		return "", err
+	}
+	if isRDSHost(host) && (sslMode == "" || sslMode == "disable") {
+		sslMode = "require"
 	}
 
 	u := &url.URL{
@@ -170,11 +227,100 @@ func resolveDatabaseURL() (string, error) {
 	return u.String(), nil
 }
 
+func normalizeDatabaseURL(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("DATABASE_URL inválida: %w", err)
+	}
+	if err := rejectDockerLoopback("DATABASE_URL", u.Hostname()); err != nil {
+		return "", err
+	}
+	if isRDSHost(u.Hostname()) {
+		q := u.Query()
+		if mode := q.Get("sslmode"); mode == "" || mode == "disable" {
+			q.Set("sslmode", "require")
+			u.RawQuery = q.Encode()
+		}
+	}
+	return u.String(), nil
+}
+
 func getEnv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
+}
+
+func runningInDocker() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	return h == "localhost" || h == "127.0.0.1" || h == "::1" || strings.HasPrefix(h, "127.")
+}
+
+func isRDSHost(host string) bool {
+	return strings.Contains(strings.ToLower(host), "rds.amazonaws.com")
+}
+
+func hostnameFromURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
+}
+
+func rejectDockerLoopback(label, host string) error {
+	if runningInDocker() && isLoopbackHost(host) {
+		return fmt.Errorf("%s=%s não funciona no Docker (localhost é o próprio container). Use o endpoint do RDS, host.docker.internal (Postgres na EC2) ou postgres (compose --profile db)", label, host)
+	}
+	return nil
+}
+
+// resolveStoragePath evita mkdir ./storage no Docker (cwd /, user atlas → permission denied).
+func resolveStoragePath() string {
+	path := getEnv("STORAGE_PATH", "./storage")
+	if filepath.IsAbs(path) {
+		return path
+	}
+	if runningInDocker() {
+		return "/data/storage"
+	}
+	return path
+}
+
+// resolveStorageConfig: na EC2 basta S3_BUCKET. Credenciais vêm da IAM role da instância.
+func resolveStorageConfig() (driver, bucket, prefix, region string, err error) {
+	bucket = strings.TrimSpace(getEnv("S3_BUCKET", ""))
+	prefix = strings.TrimSpace(getEnv("S3_PREFIX", ""))
+	region = strings.TrimSpace(getEnv("AWS_REGION", getEnv("AWS_DEFAULT_REGION", "")))
+	driver = strings.ToLower(strings.TrimSpace(getEnv("STORAGE_DRIVER", "")))
+	if driver == "" {
+		if bucket != "" {
+			driver = "s3"
+		} else {
+			driver = "local"
+		}
+	}
+	if driver != "local" && driver != "s3" {
+		return "", "", "", "", fmt.Errorf("STORAGE_DRIVER inválido: use local ou s3")
+	}
+	if driver == "s3" && bucket == "" {
+		return "", "", "", "", fmt.Errorf("S3_BUCKET é obrigatório para usar o bucket S3")
+	}
+	return driver, bucket, prefix, region, nil
+}
+
+func resolveAIServiceURL() string {
+	raw := getEnv("AI_SERVICE_URL", "http://localhost:8081")
+	if runningInDocker() && isLoopbackHost(hostnameFromURL(raw)) {
+		return "http://mnemos:8081"
+	}
+	return raw
 }
 
 func isProduction(appEnv string) bool {

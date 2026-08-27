@@ -20,7 +20,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       # 5434 na máquina para não conflitar com o Postgres local (5432) nem com outros containers
-      - "${POSTGRES_PUBLISH_PORT:-5434}:5432"
+      - "127.0.0.1:${POSTGRES_PUBLISH_PORT:-5434}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
@@ -53,8 +53,12 @@ services:
       - .env
     tty: true
     environment:
-      APP_ENV: ${APP_ENV:-production}
+      # Literal, sem ${APP_ENV}: o .env local usa development e pulava JWT/cookies.
+      APP_ENV: production
+      TZ: America/Sao_Paulo
       PORT: "8080"
+      # Literal, sem ${STORAGE_PATH}: o .env local usa ./storage e o
+      # usuário atlas não consegue criar /storage dentro do container.
       STORAGE_PATH: /data/storage
       TERM: xterm-256color
       FORCE_COLOR: "1"
