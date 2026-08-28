@@ -18,7 +18,8 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
 
-FROM alpine:3.21
+#FROM alpine:3.21
+FROM public.ecr.aws/docker/library/alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata wget su-exec \
     && addgroup -S atlas \
