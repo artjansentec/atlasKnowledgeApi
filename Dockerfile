@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 #FROM golang:1.24-alpine AS builder
-FROM public.ecr.aws/docker/library/golang:1.24-alpine
+FROM public.ecr.aws/docker/library/golang:1.24-alpine AS builder
 
 WORKDIR /src
 
