@@ -828,5 +828,3 @@ go run ./cmd/create-admin -email seu@email.com -password SUA_SENHA
 <sub>Feito com Go · Atlas Knowledge API</sub>
 
 </div>
-
-# testando pipeline
