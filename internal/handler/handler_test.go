@@ -64,7 +64,7 @@ func setupTestEnv(t *testing.T) (*echo.Echo, *db.DB, func()) {
 	e := echo.New()
 	api := e.Group("/api/v1")
 	api.POST("/auth/login", authHandler.Login)
-	api.PUT("/auth/password", authHandler.ChangePassword, authMW.RequireAuth)
+	api.PATCH("/auth/password", authHandler.ChangePassword, authMW.RequireAuth)
 	protected := api.Group("", authMW.RequireAuth)
 	protected.GET("/users", userHandler.List)
 	protected.GET("/users/:id", userHandler.Get)
@@ -181,7 +181,7 @@ func TestChangePassword(t *testing.T) {
 	token := login(t, e, "reader@test.com", "user123")
 
 	wrong := bytes.NewBufferString(`{"currentPassword":"errada","newPassword":"novaSenha1"}`)
-	wrongReq := httptest.NewRequest(http.MethodPut, "/api/v1/auth/password", wrong)
+	wrongReq := httptest.NewRequest(http.MethodPatch, "/api/v1/auth/password", wrong)
 	wrongReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	wrongReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	wrongRec := httptest.NewRecorder()
@@ -191,7 +191,7 @@ func TestChangePassword(t *testing.T) {
 	}
 
 	ok := bytes.NewBufferString(`{"currentPassword":"user123","newPassword":"novaSenha1"}`)
-	okReq := httptest.NewRequest(http.MethodPut, "/api/v1/auth/password", ok)
+	okReq := httptest.NewRequest(http.MethodPatch, "/api/v1/auth/password", ok)
 	okReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	okReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
 	okRec := httptest.NewRecorder()

@@ -114,7 +114,7 @@ paths:
           description: Perfil do usuário
 
   /api/v1/auth/password:
-    put:
+    patch:
       tags: [auth]
       summary: Trocar senha do usuário autenticado
       security:
