@@ -230,6 +230,7 @@ func main() {
 	auth.POST("/refresh", authHandler.Refresh)
 	auth.POST("/logout", authHandler.Logout, authMW.RequireAuth)
 	auth.GET("/me", authHandler.Me, authMW.RequireAuth)
+	auth.PUT("/password", authHandler.ChangePassword, authMW.RequireAuth)
 
 	protected := api.Group("", authMW.RequireAuth)
 	protected.GET("/users", userHandler.List)

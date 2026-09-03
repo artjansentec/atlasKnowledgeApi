@@ -24,6 +24,11 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
 func (h *AuthHandler) Login(c echo.Context) error {
 	var req loginRequest
 	if err := c.Bind(&req); err != nil {
@@ -70,6 +75,18 @@ func (h *AuthHandler) Me(c echo.Context) error {
 	return JSON(c, http.StatusOK, map[string]string{
 		"id": user.ID, "name": user.Name, "email": user.Email, "role": string(user.Role),
 	})
+}
+
+func (h *AuthHandler) ChangePassword(c echo.Context) error {
+	var req changePasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return Error(c, httperr.BadRequest("corpo da requisição inválido"))
+	}
+	user := middleware.GetUser(c)
+	if err := h.auth.ChangePassword(c.Request().Context(), user.ID, req.CurrentPassword, req.NewPassword); err != nil {
+		return Error(c, err)
+	}
+	return NoContent(c)
 }
 
 func (h *AuthHandler) setRefreshCookie(c echo.Context, token string) {

@@ -113,6 +113,37 @@ paths:
         '200':
           description: Perfil do usuário
 
+  /api/v1/auth/password:
+    put:
+      tags: [auth]
+      summary: Trocar senha do usuário autenticado
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  example: senha-atual
+                newPassword:
+                  type: string
+                  minLength: 8
+                  example: nova-senha
+      responses:
+        '204':
+          description: Senha atualizada
+        '400':
+          description: Senha atual inválida
+        '401':
+          description: Não autenticado
+        '422':
+          description: Nova senha inválida
+
   /api/v1/users:
     get:
       tags: [users]

@@ -64,6 +64,7 @@ func setupTestEnv(t *testing.T) (*echo.Echo, *db.DB, func()) {
 	e := echo.New()
 	api := e.Group("/api/v1")
 	api.POST("/auth/login", authHandler.Login)
+	api.PUT("/auth/password", authHandler.ChangePassword, authMW.RequireAuth)
 	protected := api.Group("", authMW.RequireAuth)
 	protected.GET("/users", userHandler.List)
 	protected.GET("/users/:id", userHandler.Get)
@@ -170,6 +171,37 @@ func TestLoginValid(t *testing.T) {
 	token := login(t, e, "admin@test.com", "admin123")
 	if token == "" {
 		t.Fatal("token vazio")
+	}
+}
+
+func TestChangePassword(t *testing.T) {
+	e, _, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	token := login(t, e, "reader@test.com", "user123")
+
+	wrong := bytes.NewBufferString(`{"currentPassword":"errada","newPassword":"novaSenha1"}`)
+	wrongReq := httptest.NewRequest(http.MethodPut, "/api/v1/auth/password", wrong)
+	wrongReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	wrongReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	wrongRec := httptest.NewRecorder()
+	e.ServeHTTP(wrongRec, wrongReq)
+	if wrongRec.Code != http.StatusBadRequest {
+		t.Fatalf("senha atual inválida: esperado 400, obteve %d: %s", wrongRec.Code, wrongRec.Body.String())
+	}
+
+	ok := bytes.NewBufferString(`{"currentPassword":"user123","newPassword":"novaSenha1"}`)
+	okReq := httptest.NewRequest(http.MethodPut, "/api/v1/auth/password", ok)
+	okReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	okReq.Header.Set(echo.HeaderAuthorization, "Bearer "+token)
+	okRec := httptest.NewRecorder()
+	e.ServeHTTP(okRec, okReq)
+	if okRec.Code != http.StatusNoContent {
+		t.Fatalf("troca de senha: esperado 204, obteve %d: %s", okRec.Code, okRec.Body.String())
+	}
+
+	if tok := login(t, e, "reader@test.com", "novaSenha1"); tok == "" {
+		t.Fatal("login com nova senha falhou")
 	}
 }
 

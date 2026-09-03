@@ -98,6 +98,20 @@ func (r *UserRepository) Update(ctx context.Context, u *domain.User) error {
 	return err
 }
 
+func (r *UserRepository) UpdatePasswordHash(ctx context.Context, id, passwordHash string) error {
+	tag, err := r.db.Pool.Exec(ctx, `
+		UPDATE users SET password_hash = $2, updated_at = NOW()
+		WHERE id = $1 AND is_active = TRUE
+	`, id, passwordHash)
+	if err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
 func (r *UserRepository) Deactivate(ctx context.Context, id string) (bool, error) {
 	tag, err := r.db.Pool.Exec(ctx, `
 		UPDATE users SET is_active = FALSE, updated_at = NOW()

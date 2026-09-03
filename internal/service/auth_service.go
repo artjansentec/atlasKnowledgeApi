@@ -102,6 +102,42 @@ func (s *AuthService) Me(ctx context.Context, userID string) (*domain.User, erro
 	return user, nil
 }
 
+func (s *AuthService) ChangePassword(ctx context.Context, userID, currentPassword, newPassword string) error {
+	if currentPassword == "" {
+		return httperr.BadRequest("senha atual é obrigatória")
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return err
+	}
+	if currentPassword == newPassword {
+		return httperr.Validation("a nova senha deve ser diferente da senha atual")
+	}
+
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return httperr.Internal("falha ao buscar usuário")
+	}
+	if user == nil {
+		return httperr.Unauthorized("usuário não encontrado")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+		return httperr.BadRequest("senha atual inválida")
+	}
+
+	hash, err := HashPassword(newPassword)
+	if err != nil {
+		return httperr.Internal("falha ao gerar senha")
+	}
+	if err := s.users.UpdatePasswordHash(ctx, user.ID, hash); err != nil {
+		return httperr.Internal("falha ao atualizar senha")
+	}
+	if s.refresh != nil {
+		_ = s.refresh.RevokeAllForUser(ctx, user.ID)
+	}
+	return nil
+}
+
 func (s *AuthService) MeByEmail(ctx context.Context, email string) (*domain.User, error) {
 	user, err := s.users.GetByEmail(ctx, email)
 	if err != nil {
