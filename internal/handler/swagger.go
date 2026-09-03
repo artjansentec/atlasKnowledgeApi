@@ -90,8 +90,10 @@ const swaggerUIHTML = `<!DOCTYPE html>
         return;
       }
       try {
+        var spec = __OPENAPI_SPEC__;
+        spec.servers = [{ url: window.location.origin, description: 'Servidor atual' }];
         SwaggerUIBundle({
-          spec: __OPENAPI_SPEC__,
+          spec: spec,
           dom_id: '#swagger-ui',
           deepLinking: true,
           persistAuthorization: true,
